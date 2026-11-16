@@ -1,57 +1,112 @@
 # Sanetra
 
-**Offline Assistive Vision Assistant for Blind and Visually Impaired Users**
+**An offline-first assistive vision app for blind and low-vision users.**
 
-## 1. Description & Problem Statement
-Blind and low-vision users often face barriers when independently identifying Indian banknotes and coins or reading printed and signboard text in English, Kannada, and Hindi. Cloud-dependent assistive apps fail without connectivity and introduce latency and privacy risks. **Sanetra** performs all currency recognition, multilingual OCR, ambient-light flashlight control, and speech synthesis **100% offline** on Android.
+Sanetra helps users identify Indian currency and read printed text using an Android phone. Currency recognition, OCR, and speech run on the device; an internet connection is used only for optional app-update checks and downloading a new release.
 
-## 2. Main Features
-- **Indian Currency Recognition & Counting:** Detects 6 banknote denominations (`₹10`, `₹20`, `₹50`, `₹100`, `₹200`, `₹500`) and 4 coin denominations (`₹1`, `₹2`, `₹5`, `₹10`) in real time and snapshot mode, gated by identity verifiers to reject foreign currency and non-currency backgrounds.
-- **Offline Multilingual OCR:** Reads English, Kannada, and Hindi text, including curved bottle labels, tilted/rotated text, and multi-column layouts.
-- **Automatic Ambient-Light Flashlight:** Monitors the device's hardware `Sensor.TYPE_LIGHT` across both Currency and OCR modes and announces `"Flashlight on."` / `"Flashlight off."` automatically in dark environments.
-- **Hands-Free Volume-Button Controls & Offline Speech:** Full operation via physical Volume Up/Down gestures and serialized offline Google TTS.
+<p align="center">
+  <a href="https://github.com/chethanone/Sanetra/releases/download/v1.0.0/Sanetra-v1.0.0-arm64.apk">
+    <img alt="Download Sanetra v1.0.0" src="https://img.shields.io/badge/Download-Android%20APK-111111?style=for-the-badge&logo=android&logoColor=white">
+  </a>
+  <a href="https://github.com/chethanone/Sanetra/releases/tag/v1.0.0">
+    <img alt="Release v1.0.0" src="https://img.shields.io/badge/Release-v1.0.0-555555?style=for-the-badge">
+  </a>
+</p>
 
-## 3. Technology Stack & System Architecture
-- **Frontend & Runtime:** Flutter (Dart `^3.13.7`), Kotlin Android channels, `flutter_onnxruntime ^1.9.0`, `camera ^0.12.2`, `flutter_tts ^4.2.5`.
-- **Architecture:** See [docs/SYSTEM_ARCHITECTURE.md](docs/SYSTEM_ARCHITECTURE.md) and [docs/MASTER_PROJECT_REPORT.md](docs/MASTER_PROJECT_REPORT.md).
+> **Current Android release:** v1.0.0 (versionCode 1) · arm64-v8a  
+> **Package ID:** `com.visionassistant.vision_assistant.visionmission`
 
-## 4. Model Information & Supported Languages
-- **Currency:** `indian_banknote_phase4l_candidate.onnx` (YOLOv8n, `0.952 mAP@0.50`), `indian_coin_phase4n_candidate.onnx` (YOLOv8n, `0.937 mAP@0.50`), `n5_note_verifier.onnx` (MobileNetV3-Small, `99.04%` val acc), `indian_coin_verifier.onnx` (`99.88%` val acc).
-- **OCR:** `PP-OCRv5` Mobile detector + English/Hindi recognizers, Kannada `CRNN v3` (clean docs), and `Arjuna SVTRv2 INT8` (`scene_arjuna_first` for scene/curved text).
-- **Supported Speech Languages:** English (`en-IN`), Kannada (`kn-IN`), Hindi (`hi-IN`) using offline Google TTS voices.
-- Full model inventory and SHA-256 hashes: [models/MODEL_CATALOG.md](models/MODEL_CATALOG.md).
+## What it does
 
-## 5. Device Requirements
-- Android `arm64-v8a` smartphone with rear camera, LED flash, hardware ambient-light sensor (`Sensor.TYPE_LIGHT`), and Google TTS offline voice packs (`en-IN`, `kn-IN`, `hi-IN`).
-- Primary physical validation device: **Nothing Phone (3a) Pro** (`Android 17 / API 37`, Snapdragon 7s Gen 3).
+- **Indian currency recognition:** identifies and counts six banknote denominations (₹10, ₹20, ₹50, ₹100, ₹200 and ₹500) and four coin denominations (₹1, ₹2, ₹5 and ₹10). The detection pipeline includes identity verification and tracking to reduce false detections and unreliable totals.
+- **Multilingual text reading:** detects and reads printed English, Kannada and Hindi text. Kannada recognition uses a document/scene-aware routing approach; text geometry and reading order are considered during processing.
+- **Voice assistance:** provides spoken recognition results using the device's offline text-to-speech voices.
+- **Hands-free controls:** physical volume buttons control mode switching, OCR rereading and the currency language selector.
+- **Automatic low-light assistance:** monitors the ambient-light sensor and controls the flashlight in Currency and OCR modes, with spoken ON/OFF feedback.
+- **Optional app updates:** when connectivity is available, Sanetra checks the project's GitHub update manifest. It shows an update prompt only when a newer compatible version is found.
 
-## 6. Installation, Build & Testing
+## Designed to work offline
+
+After installation and setup, the core features do not require an internet connection:
+
+| Feature | Offline operation |
+| --- | --- |
+| Currency detection and counting | Yes |
+| English, Kannada and Hindi OCR | Yes |
+| Speech output | Yes, with the required offline voice packs installed on Android |
+| Camera and automatic flashlight | Yes |
+| Version/update check and APK download | Requires internet |
+
+Sanetra does not send camera frames or recognized text to a cloud recognition service.
+
+## Technology
+
+- **App:** Flutter and Dart
+- **Android integration:** Kotlin platform channels and Android APIs
+- **On-device inference:** ONNX Runtime
+- **Currency:** YOLOv8n detection with MobileNetV3-Small identity-verification models and temporal tracking
+- **OCR:** PP-OCRv5 Mobile detection/recognition, Kannada CRNN and Arjuna SVTRv2 scene-recognition model
+- **Speech:** Android text-to-speech using offline English (India), Kannada and Hindi voices
+- **Update delivery:** GitHub Releases, version manifest, SHA-256 verification and Android's package installer
+
+The active model files and their technical metadata are listed in [Model Catalog](models/MODEL_CATALOG.md).
+
+## Download and install
+
+**[Download Sanetra v1.0.0 for Android (arm64-v8a)](https://github.com/chethanone/Sanetra/releases/download/v1.0.0/Sanetra-v1.0.0-arm64.apk)**
+
+1. Download the APK from the release link above.
+2. Open the downloaded APK on an Android arm64 device.
+3. Approve Android's request to install apps from that source, if prompted.
+4. Complete installation through the Android package installer.
+5. For offline speech, make sure the required Google TTS offline voice data is installed for the languages you intend to use.
+
+Android requires user confirmation to install an APK. Sanetra does not silently install updates.
+
+**Release details:** [v1.0.0 release notes and APK](https://github.com/chethanone/Sanetra/releases/tag/v1.0.0) · [All releases](https://github.com/chethanone/Sanetra/releases)
+
+## Build from source
+
+Requirements: Flutter SDK compatible with the Dart constraint in `app/final_app/pubspec.yaml`, Android SDK/Gradle, and an Android arm64 build environment.
+
 ```bash
-cd app/final_app
+git clone https://github.com/chethanone/Sanetra.git
+cd Sanetra/app/final_app
 flutter pub get
 flutter analyze lib test
 flutter test
 flutter build apk --release --flavor visionmission -t lib/main.dart
 ```
 
-## 7. Offline Operation & Optional Update System
-- **Offline Operation:** All recognition, camera, flashlight, and TTS features run locally with zero network dependency.
-- **Optional Update Checks:** When internet connectivity becomes available, `AppUpdateService` checks `update/latest.json` via HTTPS, verifies numeric `versionCode`, architecture, and SHA-256 checksum, announces availability once via TTS, and hands verified APKs to Android's `FileProvider` package installer (user confirmation required). See [update/UPDATE_SYSTEM.md](update/UPDATE_SYSTEM.md).
+The Android application ID is intentionally retained for compatible in-place upgrades:
 
-## 8. Documentation Index
-- [Master Project Report](docs/MASTER_PROJECT_REPORT.md)
-- [Currency Final Report](docs/CURRENCY_FINAL_REPORT.md)
-- [OCR Final Report](docs/OCR_FINAL_REPORT.md)
-- [Model Evaluation Report](docs/MODEL_EVALUATION_REPORT.md)
-- [Dataset Documentation](docs/DATASET_DOCUMENTATION.md)
-- [Android Application Report](docs/ANDROID_APPLICATION_REPORT.md)
-- [Device Validation Report](docs/DEVICE_VALIDATION_REPORT.md)
-- [Update System](docs/UPDATE_SYSTEM.md)
+```text
+com.visionassistant.vision_assistant.visionmission
+```
 
-## 9. Known Limitations
-- Wild scene Kannada OCR (`IndicSTR12_test`) achieves `41.00%` word exact match (`21.67%` CER) vs `95–99%` on clean printed pages.
-- Epoch-by-epoch OCR training logs were not persisted (`train_metrics.json` retains summary metrics only).
-- Release APKs currently use development signing rather than a Google Play production keystore.
+## Project documentation
 
-## 10. License
-All rights reserved; no explicit open-source reuse license is granted. See [LICENSE](LICENSE).
+- [Master project report](docs/MASTER_PROJECT_REPORT.md)
+- [Currency subsystem](docs/CURRENCY_FINAL_REPORT.md)
+- [OCR subsystem](docs/OCR_FINAL_REPORT.md)
+- [Android application](docs/ANDROID_APPLICATION_REPORT.md)
+- [Device validation](docs/DEVICE_VALIDATION_REPORT.md)
+- [Model catalog and model hashes](models/MODEL_CATALOG.md)
+- [Automatic update system](update/UPDATE_SYSTEM.md)
+- [Changelog](CHANGELOG.md)
+
+## Validation and known limitations
+
+The repository's Phase 6.0 report records static analysis, automated tests and release-build checks. Automated tests do not replace testing on a physical device.
+
+Recognition quality depends on lighting, focus, text size, print quality, note condition and scene complexity. Kannada scene text is more challenging than clean printed documents; see the OCR report for benchmark details. Offline speech depends on compatible voice data being available on the Android device.
+
+The primary validation device used during development was a Nothing Phone (3a) Pro running Android 17. Other Android devices may differ in camera, sensor, ONNX Runtime and TTS behaviour.
+
+## License and reuse
+
+This repository is published for project evaluation, academic review and transparency. **All rights are reserved; no general open-source reuse or redistribution licence is granted.** Third-party components and model weights remain subject to their respective upstream terms. See [LICENSE](LICENSE) before reuse.
+
+---
+
+For issues or project questions, use the repository's [Issues](https://github.com/chethanone/Sanetra/issues) page.
