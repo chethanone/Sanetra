@@ -88,12 +88,8 @@ void main() {
       final tempDir = await Directory.systemTemp.createTemp('sanetra_migration_');
       try {
         final manifest = UpdateManifest.tryParse(
-          _validManifestJson(
-            version: '2.0.0',
-            versionCode: 2,
-            minSupported: 1,
-            packageName: 'com.sanetra.assistivevision',
-          ),
+          _validManifestJson(version: '2.0.0', versionCode: 2, minSupported: 1,
+            packageName: 'com.sanetra.assistivevision'),
         )!;
         String? installerTargetPackage;
         final svc = AppUpdateService(
@@ -105,7 +101,6 @@ void main() {
             return {'started': true, 'isMigration': true};
           },
         );
-
         final res = await svc.downloadAndInstall(manifest);
         expect(res.success, isTrue);
         expect(installerTargetPackage, 'com.sanetra.assistivevision');
