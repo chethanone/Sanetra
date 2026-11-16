@@ -391,7 +391,7 @@ void main() {
       expect(confirmedCoinsCount, 0);
       expect(coinInflatedEvalScenes, 0);
       expect(coinInflatedTrackerScenes, 0);
-    }, skip: !File(r'C:\VisionMission\\experiments\\phase4n\\phase4n_20scenes_replay_fixture.json').existsSync()
+    }, skip: !File(r'C:\VisionMission\experiments\phase4n\phase4n_20scenes_replay_fixture.json').existsSync()
         ? 'Requires the local Phase 4N 20-scene forensic replay fixture, which is not distributed in the public source repository.'
         : false);
   });
