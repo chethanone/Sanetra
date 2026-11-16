@@ -13,7 +13,7 @@ class CurrencyLanguageOption {
   final String spokenConfirm;
 }
 
-/// Visual order of currency languages: 1. English, 2. Kannada, 3. Hindi.
+/// Visual order of currency languages: 1. English, 2. Kannada, 3. Hindi, 4. Bisaya.
 const List<CurrencyLanguageOption> kCurrencyLanguages = [
   CurrencyLanguageOption(
     code: 'en-IN',
@@ -29,6 +29,11 @@ const List<CurrencyLanguageOption> kCurrencyLanguages = [
     code: 'hi-IN',
     label: 'हिन्दी',
     spokenConfirm: 'हिन्दी',
+  ),
+  CurrencyLanguageOption(
+    code: 'ceb-PH',
+    label: 'Bisaya',
+    spokenConfirm: 'Bisaya',
   ),
 ];
 

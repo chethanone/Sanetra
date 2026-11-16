@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.1.0 (2026-11-16)
+- **Offline Bisaya (`ceb-PH`) Currency Speech:** Added Bisaya as the fourth selectable Currency Recognition language (`English`, `Kannada`, `Hindi`, `Bisaya`) with instant zero-synthesis-delay `AudioTrack` playback (`BisayaTtsChannel.kt`, `BisayaSpeechAssembler`, `BisayaNumberNormalizer`, and 43 normalized 16 kHz WAV clips totaling `1.52 MB`; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for Meta AI `facebook/mms-tts-ceb` `CC-BY-NC 4.0` attribution).
+- **Strict OCR Isolation & Pipeline Preservation:** OCR remains strictly `en-IN`, `kn-IN`, and `hi-IN`. Currency ONNX models (`Phase 4L + Phase 4N + N5 + Phase 4O.10`), safety thresholds, `en-IN`/`kn-IN`/`hi-IN` TTS, flashlight, and volume gestures remain unchanged.
+
 ## v2.0.1 (2026-11-16)
 - **Migration Installer Handoff Fix:** Integrated the verified Android APK installer target-package handoff (`AppUpdateChannel.kt`, `AppUpdateService`, `UpdatePromptDialog`) for cross-package migrations.
 - **Upgrade Compatibility:** Signed with the permanent `com.sanetra.assistivevision` release certificate (`b3986507f0092f9296342fca8fe12c7c6f2e63d4e9516399690be422149a1389`, `versionCode: 3`). Legacy `v1.0.0` users must perform the first `v2.x` installation manually (installed as a separate app alongside `v1.0.0`), while future compatible `v2.x` updates install in place.

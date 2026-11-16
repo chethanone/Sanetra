@@ -1,4 +1,4 @@
-﻿package com.sanetra.assistivevision
+package com.sanetra.assistivevision
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -27,6 +27,7 @@ class MainActivity : FlutterActivity() {
     private var currencyChannel: CurrencyPlatformChannel? = null
     private var ambientLightFlashlightChannel: AmbientLightFlashlightChannel? = null
     private var appUpdateChannel: AppUpdateChannel? = null
+    private var bisayaTtsChannel: BisayaTtsChannel? = null
     private var ttsEvalReceiver: BroadcastReceiver? = null
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -103,6 +104,9 @@ class MainActivity : FlutterActivity() {
             register(flutterEngine)
         }
         appUpdateChannel = AppUpdateChannel(applicationContext).apply {
+            register(flutterEngine)
+        }
+        bisayaTtsChannel = BisayaTtsChannel(applicationContext).apply {
             register(flutterEngine)
         }
         val evalAction = "${applicationContext.packageName}.SYNTH_KANNADA_EVAL"

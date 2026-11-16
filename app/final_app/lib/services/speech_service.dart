@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
+import 'bisaya_speech_assembler.dart';
 import 'currency_safety_evaluator.dart';
 import 'currency_speech_formatter.dart';
 import 'ocr/ocr_result.dart';
@@ -51,14 +53,35 @@ class _SelectorLatencyTrace {
   final int speakDispatchMs;
 }
 
+typedef BisayaTtsInitFn = Future<Map<String, dynamic>?> Function();
+typedef BisayaTtsSpeakFn = Future<dynamic> Function(String text, double rate);
+typedef BisayaTtsStopFn = Future<dynamic> Function();
+
 /// Shared offline-first audio/TTS service used by both Currency and OCR subsystems.
 /// Maintains a single FlutterTts instance, single-flight initialization, and a
 /// serialized epoch-guarded speech queue so utterances never overlap, cancelled
 /// futures never hang, and callers recover cleanly after errors.
 class SpeechService {
-  SpeechService({FlutterTts? tts}) : _tts = tts ?? FlutterTts();
+  SpeechService({
+    FlutterTts? tts,
+    MethodChannel? bisayaChannel,
+    BisayaTtsInitFn? bisayaInitFn,
+    BisayaTtsSpeakFn? bisayaSpeakFn,
+    BisayaTtsStopFn? bisayaStopFn,
+  }) : _tts = tts ?? FlutterTts(),
+       _bisayaChannel =
+           bisayaChannel ?? const MethodChannel('vision_assistant/bisaya_tts'),
+       _bisayaInitOverride = bisayaInitFn,
+       _bisayaSpeakOverride = bisayaSpeakFn,
+       _bisayaStopOverride = bisayaStopFn;
 
   final FlutterTts _tts;
+  final MethodChannel _bisayaChannel;
+  final BisayaTtsInitFn? _bisayaInitOverride;
+  final BisayaTtsSpeakFn? _bisayaSpeakOverride;
+  final BisayaTtsStopFn? _bisayaStopOverride;
+  bool _bisayaInitialized = false;
+  Future<bool>? _bisayaInitFuture;
 
   bool _initialized = false;
   Future<void>? _initFuture;
@@ -225,6 +248,61 @@ class SpeechService {
       });
 
       try {
+        _bisayaChannel.setMethodCallHandler((call) async {
+          switch (call.method) {
+            case 'onStart':
+              _isSpeaking = true;
+              final trace = _activeSelectorTrace;
+              if (trace != null && trace.token == _activeUtteranceToken) {
+                final onStartMs = trace.sw.elapsedMilliseconds + trace.keyAgeMs;
+                debugPrint(
+                  '[TTS-SEL-LAT] gen=${trace.generationId} lang=${trace.language} '
+                  'keyAgeMs=${trace.keyAgeMs} stateMs=${trace.stateMs} '
+                  'invalidateMs=${trace.invalidateMs} stopDispatchMs=${trace.stopDispatchMs} '
+                  'speakDispatchMs=${trace.speakDispatchMs} onStartMs=$onStartMs',
+                );
+                _activeSelectorTrace = null;
+              }
+              final startSw = _pendingStartStopwatch;
+              if (startSw != null) {
+                startSw.stop();
+                debugPrint(
+                  '[BISAYA-CB] onStart latencyMs=${startSw.elapsedMilliseconds}',
+                );
+                _pendingStartStopwatch = null;
+              } else {
+                debugPrint('[BISAYA-CB] onStart');
+              }
+              break;
+            case 'onDone':
+              if (_activeUtteranceCompleter != null) {
+                _isSpeaking = false;
+              }
+              _pendingCancelReason = 'unexplained';
+              debugPrint('[BISAYA-CB] onDone');
+              _completeActiveUtterance();
+              break;
+            case 'onCancel':
+              if (_activeUtteranceCompleter != null) {
+                _isSpeaking = false;
+              }
+              _pendingCancelReason = 'unexplained';
+              debugPrint('[BISAYA-CB] onCancel');
+              _completeActiveUtterance();
+              break;
+            case 'onError':
+              debugPrint('[BISAYA-CB] onError: ${call.arguments}');
+              if (_activeUtteranceCompleter != null) {
+                _isSpeaking = false;
+              }
+              _pendingCancelReason = 'unexplained';
+              _completeActiveUtterance();
+              break;
+          }
+        });
+      } catch (_) {}
+
+      try {
         final eng = await _tts.getDefaultEngine;
         _defaultEngine = eng?.toString();
       } catch (_) {}
@@ -321,9 +399,7 @@ class SpeechService {
       _isSpeaking = false;
       _completeActiveUtterance();
       if (_initialized) {
-        unawaited(
-          _tts.stop().timeout(const Duration(milliseconds: 200)).catchError((_) => 0),
-        );
+        unawaited(_stopAllEngines(const Duration(milliseconds: 200)));
       }
     }
   }
@@ -366,9 +442,7 @@ class SpeechService {
     );
 
     if (wasActive && _initialized) {
-      unawaited(
-        _tts.stop().timeout(const Duration(milliseconds: 120)).catchError((_) => 0),
-      );
+      unawaited(_stopAllEngines(const Duration(milliseconds: 120)));
     }
 
     if (_selectorWorkerRunning) return;
@@ -387,9 +461,13 @@ class SpeechService {
           _pendingCancelReason = 'selector_preempted';
           _isSpeaking = false;
           _completeActiveUtterance();
-          try {
-            await _tts.stop().timeout(const Duration(milliseconds: 120));
-          } catch (_) {}
+          if (req.language == 'ceb-PH') {
+            unawaited(_stopAllEngines(const Duration(milliseconds: 120)));
+          } else {
+            try {
+              await _stopAllEngines(const Duration(milliseconds: 120));
+            } catch (_) {}
+          }
           if (req.generationId != _selectorGenerationId ||
               _pendingSelectorRequest != null) {
             continue;
@@ -423,7 +501,11 @@ class SpeechService {
           'text="${req.text}" stateMs=${req.stateMs} invalidateMs=${req.invalidateMs} '
           'stopDispatchMs=$stopDispatchMs speakDispatchMs=$speakDispatchMs',
         );
-        await _speakChunkGuarded(req.text, _speechEpoch);
+        await _speakChunkGuarded(
+          req.text,
+          _speechEpoch,
+          bisayaClips: req.language == 'ceb-PH' ? const ['confirm_bisaya'] : null,
+        );
       }
     } finally {
       _selectorWorkerRunning = false;
@@ -442,9 +524,7 @@ class SpeechService {
     }
     _isSpeaking = false;
     _completeActiveUtterance();
-    try {
-      await _tts.stop().timeout(const Duration(milliseconds: 500));
-    } catch (_) {}
+    await _stopAllEngines(const Duration(milliseconds: 500));
   }
 
   /// Enqueue a serialized TTS task so only one utterance touches the Android
@@ -457,10 +537,74 @@ class SpeechService {
     return next;
   }
 
+  Future<bool> _ensureBisayaInitialized() {
+    if (_bisayaInitialized) return Future<bool>.value(true);
+    final existing = _bisayaInitFuture;
+    if (existing != null) return existing;
+
+    final future = () async {
+      try {
+        final raw = _bisayaInitOverride != null
+            ? await _bisayaInitOverride()
+            : await _bisayaChannel.invokeMapMethod<String, dynamic>(
+                'initialize',
+              );
+        if (raw == null) {
+          _langAvailable['ceb-PH'] = false;
+          return false;
+        }
+        _bisayaInitialized = true;
+        _langAvailable['ceb-PH'] = true;
+        _selectedVoices['ceb-PH'] = {
+          'name': 'recorded_pcm_clips',
+          'locale': 'ceb-PH',
+          'network_required': 'false',
+        };
+        return true;
+      } catch (e) {
+        debugPrint('[BISAYA-TTS] Lazy init failed: $e');
+        _langAvailable['ceb-PH'] = false;
+        return false;
+      } finally {
+        _bisayaInitFuture = null;
+      }
+    }();
+    _bisayaInitFuture = future;
+    return future;
+  }
+
+  Future<void> _stopAllEngines(Duration timeout) async {
+    try {
+      await _tts.stop().timeout(timeout);
+    } catch (_) {}
+    if (_bisayaInitialized || _bisayaStopOverride != null) {
+      try {
+        final f = _bisayaStopOverride != null
+            ? _bisayaStopOverride()
+            : _bisayaChannel.invokeMethod<dynamic>('stop');
+        await f.timeout(timeout);
+      } catch (_) {}
+    }
+  }
+
   /// Configure language, speech rate, and offline-preferred voice.
   /// Returns true if the target language is available; false if missing.
   Future<bool> _prepareLanguage(String lang) async {
     final normalized = (lang == 'unknown' || lang.isEmpty) ? 'en-IN' : lang;
+    if (normalized == 'ceb-PH') {
+      final ok = await _ensureBisayaInitialized();
+      if (!ok) {
+        debugPrint(
+          '[TTS-AUDIO] MISSING_OFFLINE_VOICE: ceb-PH is not available offline.',
+        );
+        return false;
+      }
+      _lastPreparedLang = 'ceb-PH';
+      _lastPreparedRate = 1.0;
+      _lastPreparedVoiceName = 'recorded_pcm_clips';
+      return true;
+    }
+
     var avail = _langAvailable[normalized] ?? false;
 
     if (!avail) {
@@ -526,7 +670,11 @@ class SpeechService {
     return true;
   }
 
-  Future<void> _speakChunkGuarded(String chunk, int myEpoch) async {
+  Future<void> _speakChunkGuarded(
+    String chunk,
+    int myEpoch, {
+    List<String>? bisayaClips,
+  }) async {
     if (myEpoch != _speechEpoch) return;
 
     final completer = Completer<void>();
@@ -534,19 +682,45 @@ class SpeechService {
     _isSpeaking = true;
 
     try {
-      final speakFuture = _tts.speak(chunk);
-      final speakRes =
-          await Future.any<dynamic>([
-            speakFuture,
-            completer.future.then((_) => 'interrupted'),
-          ]).timeout(
-            const Duration(seconds: 15),
+      if (_lastPreparedLang == 'ceb-PH') {
+        if (_bisayaSpeakOverride != null) {
+          final res = await _bisayaSpeakOverride(
+            chunk,
+            _lastPreparedRate ?? 1.0,
+          );
+          debugPrint('[BISAYA-RESULT] res=$res epoch=$myEpoch/$_speechEpoch');
+        } else {
+          await _bisayaChannel.invokeMethod<dynamic>('speak', {
+            'text': chunk,
+            if (bisayaClips != null && bisayaClips.isNotEmpty)
+              'clips': bisayaClips,
+            'rate': _lastPreparedRate ?? 1.0,
+          });
+          await completer.future.timeout(
+            const Duration(seconds: 25),
             onTimeout: () {
-              debugPrint('[TTS-AUDIO] speak() timeout after 15s for "$chunk"');
-              return 'timeout';
+              debugPrint('[BISAYA-TTS] speak() timeout after 25s for "$chunk"');
             },
           );
-      debugPrint('[TTS-RESULT] res=$speakRes epoch=$myEpoch/$_speechEpoch');
+          debugPrint('[BISAYA-RESULT] done epoch=$myEpoch/$_speechEpoch');
+        }
+      } else {
+        final speakFuture = _tts.speak(chunk);
+        final speakRes =
+            await Future.any<dynamic>([
+              speakFuture,
+              completer.future.then((_) => 'interrupted'),
+            ]).timeout(
+              const Duration(seconds: 15),
+              onTimeout: () {
+                debugPrint(
+                  '[TTS-AUDIO] speak() timeout after 15s for "$chunk"',
+                );
+                return 'timeout';
+              },
+            );
+        debugPrint('[TTS-RESULT] res=$speakRes epoch=$myEpoch/$_speechEpoch');
+      }
     } catch (e) {
       debugPrint('[TTS-AUDIO] _speakChunkGuarded error: $e');
     } finally {
@@ -616,6 +790,7 @@ class SpeechService {
     String text, {
     String language = 'en-IN',
     bool interrupt = true,
+    List<String>? bisayaClips,
   }) async {
     if (_isSelectorOpen) return;
     await initialize();
@@ -640,9 +815,7 @@ class SpeechService {
       _isSpeaking = false;
       _completeActiveUtterance();
       if (wasActive) {
-        try {
-          await _tts.stop().timeout(const Duration(milliseconds: 250));
-        } catch (_) {}
+        await _stopAllEngines(const Duration(milliseconds: 250));
       }
     } else {
       myEpoch = _speechEpoch;
@@ -671,10 +844,15 @@ class SpeechService {
         if (!ok) return;
 
         final activeLang = ok ? language : 'en-IN';
-        for (final chunk in chunkText(cleaned)) {
-          if (myEpoch != _speechEpoch) break;
-          debugPrint('[TTS-SPEAK] ($activeLang) "$chunk"');
-          await _speakChunkGuarded(chunk, myEpoch);
+        if (activeLang == 'ceb-PH' && bisayaClips != null && bisayaClips.isNotEmpty) {
+          debugPrint('[TTS-SPEAK] ($activeLang) clips=${bisayaClips.join("+")}');
+          await _speakChunkGuarded(cleaned, myEpoch, bisayaClips: bisayaClips);
+        } else {
+          for (final chunk in chunkText(cleaned)) {
+            if (myEpoch != _speechEpoch) break;
+            debugPrint('[TTS-SPEAK] ($activeLang) "$chunk"');
+            await _speakChunkGuarded(chunk, myEpoch);
+          }
         }
       } catch (e) {
         debugPrint('[TTS-AUDIO] speakText error: $e');
@@ -748,9 +926,7 @@ class SpeechService {
     _isSpeaking = false;
     _completeActiveUtterance();
     if (wasActive) {
-      try {
-        await _tts.stop().timeout(const Duration(milliseconds: 500));
-      } catch (_) {}
+      await _stopAllEngines(const Duration(milliseconds: 500));
     }
 
     final groups = <({String lang, List<String> texts})>[];
@@ -767,8 +943,8 @@ class SpeechService {
       }
       final units = line.segments.isNotEmpty
           ? line.segments
-              .where((s) => !(s.isLanguageUncertain && s.confidence < 0.58))
-              .map((s) => (lang: s.language, text: s.text))
+                .where((s) => !(s.isLanguageUncertain && s.confidence < 0.58))
+                .map((s) => (lang: s.language, text: s.text))
           : [(lang: line.language, text: line.text)];
       for (final unit in units) {
         final lang = (unit.lang == 'unknown' || unit.lang.isEmpty)
@@ -844,7 +1020,14 @@ class SpeechService {
       language: language,
     );
     debugPrint('[TTS-CURRENCY-$language] (${assessment.status.name}) "$text"');
-    await speakText(text, language: language, interrupt: interrupt);
+    await speakText(
+      text,
+      language: language,
+      interrupt: interrupt,
+      bisayaClips: language == 'ceb-PH'
+          ? BisayaSpeechAssembler.clipsForAssessment(assessment)
+          : null,
+    );
   }
 
   /// Internal debug-only diagnostic to verify audible English, Kannada, and Hindi

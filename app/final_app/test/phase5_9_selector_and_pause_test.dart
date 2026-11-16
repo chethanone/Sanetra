@@ -227,7 +227,9 @@ void main() {
       expect(persisted, 'hi-IN');
       await Future<void>.delayed(const Duration(milliseconds: 10));
 
-      // 3. Before Hindi finishes, press Volume Down -> English (must interrupt Hindi!)
+      // 3. Before Hindi finishes, press Volume Down -> Bisaya -> English
+      final ceb = ctrl.navigateDown();
+      expect(ceb.code, 'ceb-PH');
       final en = ctrl.navigateDown();
       expect(en.code, 'en-IN');
       expect(ctrl.selectedCode, 'en-IN');
@@ -287,7 +289,8 @@ void main() {
 
       speech.setSelectorOpen(true);
 
-      // Synchronous burst: en -> kn -> hi -> en -> kn (final = kn-IN)
+      // Synchronous burst: en -> kn -> hi -> ceb -> en -> kn (final = kn-IN)
+      ctrl.navigateDown();
       ctrl.navigateDown();
       ctrl.navigateDown();
       ctrl.navigateDown();

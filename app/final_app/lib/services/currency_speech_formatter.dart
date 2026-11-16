@@ -1,3 +1,4 @@
+import 'bisaya_number_normalizer.dart';
 import 'currency_model_service.dart';
 import 'currency_safety_evaluator.dart';
 import 'kannada_number_normalizer.dart';
@@ -329,7 +330,7 @@ class CurrencySpeechFormatter {
   }
 
   /// Format [assessment] in the requested currency speech [language]
-  /// (`'en-IN'`, `'kn-IN'`, or `'hi-IN'`).
+  /// (`'en-IN'`, `'kn-IN'`, `'hi-IN'`, or `'ceb-PH'`).
   static String formatAssessment(
     CurrencySafetyAssessment assessment, {
     required String language,
@@ -339,6 +340,8 @@ class CurrencySpeechFormatter {
         return KannadaNumberNormalizer.formatAssessmentKannada(assessment);
       case 'hi-IN':
         return formatAssessmentHindi(assessment);
+      case 'ceb-PH':
+        return BisayaNumberNormalizer.formatAssessmentBisaya(assessment);
       case 'en-IN':
       default:
         return formatAssessmentEnglish(assessment);
@@ -352,6 +355,8 @@ class CurrencySpeechFormatter {
         return 'ಹಣ ಕಂಡುಬಂದಿಲ್ಲ. ದಯವಿಟ್ಟು ಹತ್ತಿರ ಹಿಡಿಯಿರಿ.';
       case 'hi-IN':
         return 'कोई मुद्रा नहीं मिली। कृपया पास लाएँ।';
+      case 'ceb-PH':
+        return 'Walay kwarta nga nakita. Palihug ipaduol pa gamay.';
       case 'en-IN':
       default:
         return 'No currency detected. Please hold closer.';

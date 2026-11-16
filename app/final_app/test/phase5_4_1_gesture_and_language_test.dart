@@ -160,21 +160,25 @@ void main() {
   });
 
   group('Phase 5.4.1 Language Navigation & Immediate Speech', () {
-    test('Visual language order remains English, Kannada, Hindi', () {
+    test('Visual language order remains English, Kannada, Hindi, Bisaya', () {
       expect(
         kCurrencyLanguages.map((l) => l.code).toList(),
-        const ['en-IN', 'kn-IN', 'hi-IN'],
+        const ['en-IN', 'kn-IN', 'hi-IN', 'ceb-PH'],
       );
       expect(
         kCurrencyLanguages.map((l) => l.spokenConfirm).toList(),
-        const ['English', 'ಕನ್ನಡ', 'हिन्दी'],
+        const ['English', 'ಕನ್ನಡ', 'हिन्दी', 'Bisaya'],
       );
     });
 
-    test('Volume Up moves to previous item and wraps English -> Hindi', () {
+    test('Volume Up moves to previous item and wraps English -> Bisaya', () {
       final controller = CurrencyLanguageController(initialLanguage: 'en-IN');
 
-      // English -> Hindi (wraparound)
+      // English -> Bisaya (wraparound)
+      expect(controller.navigateUp().code, 'ceb-PH');
+      expect(controller.selectedCode, 'ceb-PH');
+
+      // Bisaya -> Hindi
       expect(controller.navigateUp().code, 'hi-IN');
       expect(controller.selectedCode, 'hi-IN');
 
@@ -187,7 +191,7 @@ void main() {
       expect(controller.selectedCode, 'en-IN');
     });
 
-    test('Volume Down moves to next item and wraps Hindi -> English', () {
+    test('Volume Down moves to next item and wraps Bisaya -> English', () {
       final controller = CurrencyLanguageController(initialLanguage: 'en-IN');
 
       // English -> Kannada
@@ -198,7 +202,11 @@ void main() {
       expect(controller.navigateDown().code, 'hi-IN');
       expect(controller.selectedCode, 'hi-IN');
 
-      // Hindi -> English (wraparound)
+      // Hindi -> Bisaya
+      expect(controller.navigateDown().code, 'ceb-PH');
+      expect(controller.selectedCode, 'ceb-PH');
+
+      // Bisaya -> English (wraparound)
       expect(controller.navigateDown().code, 'en-IN');
       expect(controller.selectedCode, 'en-IN');
     });
@@ -256,20 +264,21 @@ void main() {
         },
       );
 
-      // Rapid presses: English -> Kannada -> Hindi -> English
+      // Rapid presses: English -> Kannada -> Hindi -> Bisaya -> English
       controller.navigateDown(); // kn-IN (outdated)
       controller.navigateDown(); // hi-IN (outdated)
+      controller.navigateDown(); // ceb-PH (outdated)
       controller.navigateDown(); // en-IN (latest)
 
       // Preference changed immediately on every step
-      expect(prefUpdates, ['kn-IN', 'hi-IN', 'en-IN']);
+      expect(prefUpdates, ['kn-IN', 'hi-IN', 'ceb-PH', 'en-IN']);
       expect(controller.selectedCode, 'en-IN');
 
       // Release the first stop() call; outdated epochs must bail out without speaking
       firstStopCompleter.complete();
       await Future<void>.delayed(const Duration(milliseconds: 30));
 
-      expect(stopCalls, 3);
+      expect(stopCalls, 4);
       expect(maxConcurrentSpeak, 1);
       expect(spoken, [(text: 'English', language: 'en-IN')]);
     });
