@@ -244,13 +244,12 @@ class AppUpdateChannel(private val context: Context) {
         }
         if (expectedPackageName != SANETRA_PACKAGE_NAME ||
             !Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$").matches(expectedPackageName)
-        ) {{
+        ) {
             return mapOf("started" to false, "error" to "Untrusted target package ID")
         }
         return try {
-            // Verify the downloaded APK matches the package declared by the trusted release manifest.
-            // A different package is allowed only for the explicit v1 -> v2 migration;
-            // Android will install it as a separate app and preserve the existing v1 app.
+            // Validate the downloaded APK against the package ID in the trusted release manifest.
+            // A different package is allowed only for the explicit v1 -> v2 migration.
             val pkgInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 context.packageManager.getPackageArchiveInfo(
                     apkFile.absolutePath,
@@ -263,7 +262,7 @@ class AppUpdateChannel(private val context: Context) {
             if (pkgInfo == null || pkgInfo.packageName != expectedPackageName) {
                 return mapOf(
                     "started" to false,
-                    "error" to "Downloaded APK does not match the release package ID (${pkgInfo?.packageName ?: "invalid"})"
+                    "error" to "Downloaded APK does not match the expected release package ID"
                 )
             }
 
