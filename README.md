@@ -103,6 +103,10 @@ Recognition quality depends on lighting, focus, text size, print quality, note c
 
 The primary validation device used during development was a Nothing Phone (3a) Pro running Android 17. Other Android devices may differ in camera, sensor, ONNX Runtime and TTS behaviour.
 
+### Android release signing
+
+The APK is distributed directly through GitHub Releases, not through Google Play. This build uses the project's configured local/development signing identity. Future in-app upgrades must use the same signing certificate and a higher Android `versionCode`; keep the signing keystore backed up securely and never commit it to the repository.
+
 ## License and reuse
 
 This repository is published for project evaluation, academic review and transparency. **All rights are reserved; no general open-source reuse or redistribution licence is granted.** Third-party components and model weights remain subject to their respective upstream terms. See [LICENSE](LICENSE) before reuse.
