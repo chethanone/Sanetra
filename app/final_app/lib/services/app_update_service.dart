@@ -456,7 +456,7 @@ class AppUpdateService {
       // the running v1 package during the one-time v1 -> v2 migration.
       final expectedPackageName =
           manifest.packageName ?? (await _getInstalledAppInfo()).packageName;
-      if (expectedPackageName != sanetraPackageName &&
+      if (expectedPackageName != UpdateManifest.sanetraPackageName &&
           expectedPackageName != (await _getInstalledAppInfo()).packageName) {
         await destFile.delete();
         return const UpdateDownloadResult(
