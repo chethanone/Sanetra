@@ -24,14 +24,16 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          flutter-version: '3.50.0'
           cache: true
 
       - name: Install Flutter dependencies
         run: flutter pub get
 
       - name: Run Flutter analyzer
-        run: flutter analyze lib test
+        # Keep info-level deprecation notices visible without failing CI.
+        # Warnings and errors remain fatal.
+        run: flutter analyze lib test --no-fatal-infos
 
       - name: Run Flutter tests
         run: flutter test
