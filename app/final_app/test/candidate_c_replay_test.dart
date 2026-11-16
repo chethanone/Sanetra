@@ -164,6 +164,8 @@ void main() {
       }),
     );
     print('[DART-REPLAY] Saved results to $_outJson');
-  });
+  }, skip: !File(_inJson).existsSync()
+      ? 'Requires the local Candidate C evaluation replay JSON, which is not distributed in the public source repository.'
+      : false);
 }
 
