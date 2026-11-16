@@ -182,9 +182,9 @@ class _UpdatePromptDialogState extends State<UpdatePromptDialog> {
               minimumSize: const Size(120, 48),
             ),
             onPressed: _isUpdating ? null : _handleUpdateNow,
-            child: const Text(
-              'Update now',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            child: Text(
+              widget.isMigration ? 'Install separately' : 'Update now',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
             ),
           ),
         ],
