@@ -242,13 +242,11 @@ class AppUpdateChannel(private val context: Context) {
                 "error" to "Install unknown apps permission required"
             )
         }
-        if (expectedPackageName != SANETRA_PACKAGE_NAME ||
-            !Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$").matches(expectedPackageName)
-        ) {
+        if (expectedPackageName != SANETRA_PACKAGE_NAME) {
             return mapOf("started" to false, "error" to "Untrusted target package ID")
         }
         return try {
-            // Validate the downloaded APK against the package ID in the trusted release manifest.
+            // Verify the APK against the package ID in the validated release manifest.
             // A different package is allowed only for the explicit v1 -> v2 migration.
             val pkgInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 context.packageManager.getPackageArchiveInfo(
