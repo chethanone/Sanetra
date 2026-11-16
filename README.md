@@ -106,7 +106,7 @@ The primary validation device used during development was a Nothing Phone (3a) P
 
 ### Android release signing
 
-The APK is distributed directly through GitHub Releases, not through Google Play. Beginning with `v2.0.0` (`com.sanetra.assistivevision`), release builds are signed with a dedicated permanent release keystore (`CN=Sanetra Release`, SHA-256 certificate fingerprint `b3986507f0092f9296342fca8fe12c7c6f2e63d4e9516399690be422149a1389`). Future in-app upgrades must use the same signing certificate and a higher Android `versionCode`; keep the signing keystore backed up securely and never commit it to the repository.
+The APK is distributed directly through GitHub Releases, not through Google Play. Beginning with `v2.0.0` (`com.sanetra.assistivevision`), release builds use a dedicated permanent Android release-signing certificate. Its SHA-256 fingerprint is `b3986507f0092f9296342fca8fe12c7c6f2e63d4e9516399690be422149a1389` and can be used to verify the signer. Future in-app upgrades must use the same signing certificate and a higher Android `versionCode`; keep the private signing keystore backed up securely and never commit it to the repository.
 
 ## License and reuse
 
