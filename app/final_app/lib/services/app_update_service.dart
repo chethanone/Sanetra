@@ -458,9 +458,9 @@ class AppUpdateService {
         );
       }
 
-      // The expected package comes from the trusted, validated release manifest.
-      // For v1.0.0 -> v2.0.0 this intentionally differs from the currently
-      // installed package so Android can install Sanetra as a separate app.
+      // The manifest declares the package expected inside the downloaded APK.
+      // For the v1 -> v2 migration this intentionally differs from the running
+      // package, allowing Android to install v2 as a separate application.
       final expectedPackageName =
           manifest.packageName ?? (await _getInstalledAppInfo()).packageName;
       if (!_androidPackageNameRegex.hasMatch(expectedPackageName)) {
@@ -612,7 +612,168 @@ class AppUpdateService {
 }
 );
   static final RegExp _androidPackageNameRegex = RegExp(
-    r'^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$',
+    r'^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+
+
+  static bool isTrustedHttpsUrl(String url) {
+    final uri = Uri.tryParse(url.trim());
+    if (uri == null || uri.scheme != 'https') return false;
+    final host = uri.host.toLowerCase();
+    if (host == 'github.com' ||
+        host == 'raw.githubusercontent.com' ||
+        host == 'objects.githubusercontent.com') {
+      return uri.path.toLowerCase().contains('/chethanone/sanetra');
+    }
+    return false;
+  }
+
+  String get resolvedDownloadUrl {
+    if (downloadUrl != null && downloadUrl!.trim().isNotEmpty) {
+      return downloadUrl!.trim();
+    }
+    return 'https://github.com/chethanone/Sanetra/releases/download/v$version/$apkAsset';
+  }
+
+  static UpdateManifest? tryParse(String rawJson) {
+    try {
+      final decoded = jsonDecode(rawJson);
+      if (decoded is! Map<String, dynamic>) return null;
+
+      final version = (decoded['version'] as String?)?.trim() ?? '';
+      final versionCode = decoded['versionCode'];
+      final minSupported = decoded['minimumSupportedVersionCode'];
+      final platform = (decoded['platform'] as String?)?.trim().toLowerCase() ?? '';
+      final arch = (decoded['architecture'] as String?)?.trim() ?? '';
+      final releaseType = (decoded['releaseType'] as String?)?.trim() ?? 'stable';
+      final apkAsset = (decoded['apkAsset'] as String?)?.trim() ?? '';
+      final sha256 = (decoded['sha256'] as String?)?.trim() ?? '';
+      final releaseNotes = (decoded['releaseNotes'] as String?)?.trim() ?? '';
+      final releaseUrl = (decoded['releaseUrl'] as String?)?.trim() ?? '';
+      final packageName = (decoded['packageName'] as String?)?.trim();
+      final downloadUrl = (decoded['downloadUrl'] as String?)?.trim();
+
+      if (version.isEmpty ||
+          versionCode is! int ||
+          versionCode <= 0 ||
+          minSupported is! int ||
+          minSupported < 1 ||
+          platform != 'android' ||
+          arch.isEmpty ||
+          apkAsset.isEmpty ||
+          !apkAsset.endsWith('.apk') ||
+          !_sha256Regex.hasMatch(sha256) ||
+          !isTrustedHttpsUrl(releaseUrl)) {
+        return null;
+      }
+
+      if (downloadUrl != null &&
+          downloadUrl.isNotEmpty &&
+          !isTrustedHttpsUrl(downloadUrl)) {
+        return null;
+      }
+
+      final manifest = UpdateManifest(
+        version: version,
+        versionCode: versionCode,
+        minimumSupportedVersionCode: minSupported,
+        platform: platform,
+        architecture: arch,
+        releaseType: releaseType,
+        apkAsset: apkAsset,
+        sha256: sha256.toUpperCase(),
+        releaseNotes: releaseNotes,
+        releaseUrl: releaseUrl,
+        packageName: (packageName != null && packageName.isNotEmpty)
+            ? packageName
+            : null,
+        downloadUrl: downloadUrl,
+      );
+
+      if (!isTrustedHttpsUrl(manifest.resolvedDownloadUrl)) {
+        return null;
+      }
+      return manifest;
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+class UpdateCheckResult {
+  const UpdateCheckResult({
+    required this.status,
+    this.manifest,
+    this.installed,
+    this.reason,
+  });
+
+  final UpdateCheckStatus status;
+  final UpdateManifest? manifest;
+  final InstalledAppInfo? installed;
+  final String? reason;
+}
+
+class UpdateDownloadResult {
+  const UpdateDownloadResult({
+    required this.success,
+    this.filePath,
+    this.error,
+    this.needsInstallPermission = false,
+    this.installerCancelled = false,
+  });
+
+  final bool success;
+  final String? filePath;
+  final String? error;
+  final bool needsInstallPermission;
+  final bool installerCancelled;
+}
+
+typedef ManifestFetcher = Future<String> Function(Uri url, Duration timeout);
+typedef ApkDownloader = Future<void> Function(
+  Uri url,
+  File destination,
+  void Function(double progress)? onProgress,
+  Duration timeout,
+);
+
+/// Optional online update checker for Sanetra using GitHub Releases.
+/// Never blocks or interferes with offline currency or OCR functionality.
+class AppUpdateService {
+  AppUpdateService({
+    String? manifestUrl,
+    this.checkInterval = const Duration(hours: 6),
+    this.requestTimeout = const Duration(seconds: 8),
+    this.downloadTimeout = const Duration(minutes: 3),
+    this.maxApkBytes = 600 * 1024 * 1024,
+    Future<bool> Function()? checkConnectivity,
+    Stream<bool>? connectivityStream,
+    Future<InstalledAppInfo> Function()? getInstalledAppInfo,
+    ManifestFetcher? fetchManifest,
+    ApkDownloader? downloadApk,
+    Future<String?> Function(String path)? computeSha256,
+    Future<Directory> Function()? getCacheDir,
+    Future<Map<String, dynamic>> Function(String path)? launchInstaller,
+    Future<void> Function()? openInstallSettings,
+    DateTime Function()? now,
+  }) : manifestUrl =
+           manifestUrl ??
+           'https://raw.githubusercontent.com/chethanone/Sanetra/main/update/latest.json',
+       _checkConnectivity = checkConnectivity ?? _defaultCheckConnectivity,
+       _connectivityStream =
+           connectivityStream ?? _defaultConnectivityStream(),
+       _getInstalledAppInfo =
+           getInstalledAppInfo ?? _defaultGetInstalledAppInfo,
+       _fetchManifest = fetchManifest ?? _defaultFetchManifest,
+       _downloadApk = downloadApk ?? _defaultDownloadApk,
+       _computeSha256 = computeSha256 ?? _defaultComputeSha256,
+       _getCacheDir = getCacheDir ?? _defaultGetCacheDir,
+       _launchInstaller = launchInstaller ?? _defaultLaunchInstaller,
+       _openInstallSettings =
+           openInstallSettings ?? _defaultOpenInstallSettings,
+       _now = now ?? DateTime.now;
+
+  static const MethodChannel _channel = MethodChannel(
+    'vision_assistant/app_update',
   );
   static const EventChannel _connChannel = EventChannel(
     'vision_assistant/connectivity',
