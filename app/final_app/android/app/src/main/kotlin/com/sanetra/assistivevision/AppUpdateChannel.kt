@@ -29,6 +29,7 @@ import java.security.MessageDigest
 class AppUpdateChannel(private val context: Context) {
     companion object {
         private const val TAG = "SanetraUpdate"
+        private const val SANETRA_PACKAGE_NAME = "com.sanetra.assistivevision"
         private const val METHOD_CHANNEL = "vision_assistant/app_update"
         private const val CONNECTIVITY_EVENT_CHANNEL = "vision_assistant/connectivity"
     }
@@ -78,10 +79,13 @@ class AppUpdateChannel(private val context: Context) {
                     }
                     "installApk" -> {
                         val path = call.argument<String>("path")
+                        val expectedPackageName = call.argument<String>("expectedPackageName")
                         if (path.isNullOrBlank()) {
                             result.success(mapOf("started" to false, "error" to "Empty APK path"))
+                        } else if (expectedPackageName.isNullOrBlank()) {
+                            result.success(mapOf("started" to false, "error" to "Missing expected APK package ID"))
                         } else {
-                            result.success(installApk(File(path)))
+                            result.success(installApk(File(path), expectedPackageName))
                         }
                     }
                     else -> result.notImplemented()
@@ -225,7 +229,7 @@ class AppUpdateChannel(private val context: Context) {
         }
     }
 
-    private fun installApk(apkFile: File): Map<String, Any> {
+    private fun installApk(apkFile: File, expectedPackageName: String): Map<String, Any> {
         if (!apkFile.exists() || !apkFile.isFile) {
             return mapOf("started" to false, "error" to "APK file not found")
         }
@@ -238,8 +242,15 @@ class AppUpdateChannel(private val context: Context) {
                 "error" to "Install unknown apps permission required"
             )
         }
+        if (expectedPackageName != SANETRA_PACKAGE_NAME ||
+            !Regex("^[A-Za-z][A-Za-z0-9_]*(\\\\.[A-Za-z][A-Za-z0-9_]*)+$").matches(expectedPackageName)
+        ) {
+            return mapOf("started" to false, "error" to "Untrusted target package ID")
+        }
         return try {
-            // Verify APK is intended for this package before handing to installer
+            // Verify the downloaded APK matches the package declared by the trusted release manifest.
+            // A different package is allowed only for the explicit v1 -> v2 migration;
+            // Android will install it as a separate app and preserve the existing v1 app.
             val pkgInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 context.packageManager.getPackageArchiveInfo(
                     apkFile.absolutePath,
@@ -249,10 +260,10 @@ class AppUpdateChannel(private val context: Context) {
                 @Suppress("DEPRECATION")
                 context.packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
             }
-            if (pkgInfo == null || pkgInfo.packageName != context.packageName) {
+            if (pkgInfo == null || pkgInfo.packageName != expectedPackageName) {
                 return mapOf(
                     "started" to false,
-                    "error" to "APK package mismatch (${pkgInfo?.packageName ?: "invalid"})"
+                    "error" to "Downloaded APK does not match the release package ID (${pkgInfo?.packageName ?: "invalid"})"
                 )
             }
 
@@ -267,8 +278,9 @@ class AppUpdateChannel(private val context: Context) {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)
-            Log.i(TAG, "Launched Android package installer for ${apkFile.name}")
-            mapOf("started" to true)
+            val isMigration = expectedPackageName != context.packageName
+            Log.i(TAG, "Launched Android package installer for ${apkFile.name}; target=$expectedPackageName; migration=$isMigration")
+            mapOf("started" to true, "isMigration" to isMigration, "targetPackageName" to expectedPackageName)
         } catch (t: Throwable) {
             Log.w(TAG, "installApk failed: ${t.message}")
             mapOf("started" to false, "error" to (t.message ?: "Installer error"))
