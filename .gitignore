@@ -1,0 +1,27 @@
+# Flutter / Dart / Android build artifacts
+**/build/
+**/.dart_tool/
+**/.gradle/
+**/ephemeral/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Secrets, keystores, and environment files
+*.jks
+*.keystore
+key.properties
+.env
+.env.*
+*google-services*.json
+
+# Python / OS / IDE
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+.DS_Store
+Thumbs.db
+*.apk
+
+local.properties

@@ -1,0 +1,10 @@
+model_id,subsystem,architecture,backbone,input_dim,output_dim,epochs,status
+banknote_phase4l_prod,Currency,YOLOv8n,CSPDarknet-n,1x3x640x640,1x10x8400 (6 classes),86,PRODUCTION_ACTIVE
+coin_phase4n_prod,Currency,YOLOv8n,CSPDarknet-n,1x3x640x640,1x8x8400 (4 classes),100,PRODUCTION_ACTIVE
+n5_note_verifier_prod,Currency Verifier,MobileNetV3-Small,MobileNetV3-Small (1.52M params),1x3x224x224,1x3 (FGN/INR/NON),15,PRODUCTION_ACTIVE
+coin_4o10_verifier_prod,Currency Verifier,MobileNetV3-Small,MobileNetV3-Small (1.52M params),1x3x224x224,1x3 (FGN/INR/NON),15,PRODUCTION_ACTIVE
+ppocrv5_detector_prod,OCR Detection,PP-OCRv5 Mobile DBNet,MobileNetV3/LCNet,Bx3xHxW (dynamic),Bx1xHxW probability map,Pretrained,PRODUCTION_ACTIVE
+ppocrv5_en_rec_prod,OCR English,PP-OCRv5 Mobile SVTR/CRNN,PPLCNetV3,Bx3x48xW,BxTx438,Pretrained,PRODUCTION_ACTIVE
+ppocrv5_hi_rec_prod,OCR Hindi,PP-OCRv5 Mobile SVTR/CRNN,PPLCNetV3,Bx3x48xW,BxTx570,Pretrained,PRODUCTION_ACTIVE
+ka_crnn_v3_tier1,OCR Kannada (Clean),CRNN (BiLSTM+CTC),CNN+BiLSTM,Bx3x48xW,BxTx165,Unavailable,PRODUCTION_ACTIVE (Clean Docs)
+arjuna_svtrv2_int8_tier2,OCR Kannada (Scene),Arjuna SVTRv2 INT8,SVTRv2,Bx3x32xW,BxTx221,Pretrained,PRODUCTION_ACTIVE (Scene-First)

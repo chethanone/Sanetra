@@ -1,0 +1,46 @@
+name: Sanetra Android CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  analyze-test-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app/final_app
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Run Flutter analyzer
+        run: flutter analyze lib test
+
+      - name: Run Flutter tests
+        run: flutter test
+
+      - name: Build Android Release APK (visionmission flavor)
+        run: flutter build apk --release --flavor visionmission -t lib/main.dart
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanetra-visionmission-release-apk
+          path: app/final_app/build/app/outputs/flutter-apk/app-visionmission-release.apk

@@ -1,0 +1,13 @@
+Sanetra — Proprietary / All Rights Reserved (No Open-Source Reuse License Granted)
+
+Copyright (c) 2026 Chethan (chethanone).
+
+This repository is published for project evaluation, academic review, and transparency.
+No open-source license or unrestricted commercial/redistribution rights are granted unless
+explicitly specified in a future license update.
+
+Third-Party Components & Research Models:
+- ONNX models under app/final_app/assets/models/ocr/ include PaddleOCR PP-OCRv5 Mobile exports,
+  Arjuna SVTRv2 INT8 Kannada scene recognition weights, and project-trained YOLOv8n / MobileNetV3-Small
+  currency weights. Refer to models/MODEL_CATALOG.md and the respective upstream project licenses
+  before any third-party reuse.
