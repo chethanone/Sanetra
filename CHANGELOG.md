@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.1 (2026-11-16)
+- **Migration Installer Handoff Fix:** Integrated the verified Android APK installer target-package handoff (`AppUpdateChannel.kt`, `AppUpdateService`, `UpdatePromptDialog`) for cross-package migrations.
+- **Upgrade Compatibility:** Signed with the permanent `com.sanetra.assistivevision` release certificate (`b3986507f0092f9296342fca8fe12c7c6f2e63d4e9516399690be422149a1389`, `versionCode: 3`). Legacy `v1.0.0` users must perform the first `v2.x` installation manually (installed as a separate app alongside `v1.0.0`), while future compatible `v2.x` updates install in place.
+
 ## v2.0.0 (2026-11-16)
 - **Android Application Identity Migration:** Migrated `applicationId` and `namespace` from `com.visionassistant.vision_assistant.visionmission` to `com.sanetra.assistivevision` (`versionCode: 2`, `versionName: 2.0.0`).
 - **Permanent Release Signing:** Signed release APK with a dedicated permanent Android release-signing certificate (SHA-256 fingerprint `b3986507f0092f9296342fca8fe12c7c6f2e63d4e9516399690be422149a1389`) so future `v2.x+` updates install cleanly in place.
