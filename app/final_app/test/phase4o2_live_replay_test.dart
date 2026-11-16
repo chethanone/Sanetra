@@ -315,7 +315,7 @@ void main() {
     expect(incompleteCount, 0);
     expect(wrongConfirmed, 0);
     expect(confirmedTwoCount, greaterThanOrEqualTo(15));
-  }, skip: !File(r'C:\\VisionMission\\experiments\\phase4o\\live_camera_4o3\\logs\\scene4_raw.log').existsSync()
+  }, skip: !File(r'C:\VisionMission\\experiments\\phase4o\\live_camera_4o3\\logs\\scene4_raw.log').existsSync()
       ? 'Requires local Phase 4O.3 physical-device logcat fixture, which is not distributed in the public source repository.'
       : false);
 }
