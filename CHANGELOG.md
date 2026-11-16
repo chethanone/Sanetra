@@ -2,7 +2,7 @@
 
 ## v2.0.0 (2026-11-16)
 - **Android Application Identity Migration:** Migrated `applicationId` and `namespace` from `com.visionassistant.vision_assistant.visionmission` to `com.sanetra.assistivevision` (`versionCode: 2`, `versionName: 2.0.0`).
-- **Permanent Release Signing:** Signed release APK with dedicated permanent release keystore (`CN=Sanetra Release`, SHA-256 fingerprint `b3986507f0092f9296342fca8fe12c7c6f2e63d4e9516399690be422149a1389`) so future `v2.x+` updates install cleanly in place.
+- **Permanent Release Signing:** Signed release APK with a dedicated permanent Android release-signing certificate (SHA-256 fingerprint `b3986507f0092f9296342fca8fe12c7c6f2e63d4e9516399690be422149a1389`) so future `v2.x+` updates install cleanly in place.
 - **Update Checker Migration Handling:** Added `packageName` manifest validation (`UpdateCheckStatus.migrationAvailable`) and migration notice in `UpdatePromptDialog` so `v1.0.0` installs are informed that `v2.0.0` installs as a new package rather than an in-place overwrite.
 - **Publication-Quality Visualizations:** Redesigned all 31 documentation plots (`docs/figures/*.png`) from original numerical data with a unified white/navy/teal style, and added `docs/VISUALIZATION_STYLE_GUIDE.md` and `docs/VISUALIZATION_AUDIT_REPORT.md`.
 
