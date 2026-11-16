@@ -243,8 +243,8 @@ class AppUpdateChannel(private val context: Context) {
             )
         }
         if (expectedPackageName != SANETRA_PACKAGE_NAME ||
-            !Regex("^[A-Za-z][A-Za-z0-9_]*(\\\\.[A-Za-z][A-Za-z0-9_]*)+$").matches(expectedPackageName)
-        ) {
+            !Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$").matches(expectedPackageName)
+        ) {{
             return mapOf("started" to false, "error" to "Untrusted target package ID")
         }
         return try {
