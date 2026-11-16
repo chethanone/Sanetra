@@ -1,13 +1,13 @@
 {
-  "version": "2.0.1",
-  "versionCode": 3,
+  "version": "2.0.3",
+  "versionCode": 5,
   "minimumSupportedVersionCode": 1,
   "packageName": "com.sanetra.assistivevision",
   "platform": "android",
   "architecture": "arm64-v8a",
   "releaseType": "stable",
-  "apkAsset": "Sanetra-v2.0.1-arm64.apk",
-  "sha256": "C7564E3B40FB719E5E9807043358041E6A961FF8171373212F765FB5709E87F8",
-  "releaseNotes": "Sanetra v2.0.1 (versionCode 3) includes the verified Android APK installer handoff for cross-package migrations and release signing under com.sanetra.assistivevision. Legacy v1.0.0 (com.visionassistant.vision_assistant.visionmission) users must perform the first v2.x installation manually (Android installs it as a separate app alongside v1.0.0), while future compatible v2.x updates install in place.",
-  "releaseUrl": "https://github.com/chethanone/Sanetra/releases/tag/v2.0.1"
+  "apkAsset": "Sanetra-v2.0.3-arm64.apk",
+  "sha256": "D662C6695A0A1AD43998A50749F9F5ABA79845012308900DCF5677B770BCAAA3",
+  "releaseNotes": "Testing the widget",
+  "releaseUrl": "https://github.com/chethanone/Sanetra/releases/tag/v2.0.3"
 }
