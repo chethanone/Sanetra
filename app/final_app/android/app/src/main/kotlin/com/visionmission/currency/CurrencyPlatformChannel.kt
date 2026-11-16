@@ -36,6 +36,12 @@ class CurrencyPlatformChannel(
     private val diagnosticFrameSeq = AtomicLong(0)
     private var diagReceiver: BroadcastReceiver? = null
 
+    // The app ID was rebranded from the legacy .visionmission suffix to
+    // com.sanetra.assistivevision. Keep production identity separate from
+    // diagnostic candidate flavors while selecting the same validated final models.
+    private fun isSanetraProductionPackage(): Boolean =
+        context.packageName == "com.sanetra.assistivevision"
+
     private fun isIdentityCandidatePackage(): Boolean =
         context.packageName.endsWith(".identitycandidate") ||
             context.packageName.endsWith(".identitycandidate_v2") ||
@@ -43,8 +49,14 @@ class CurrencyPlatformChannel(
             context.packageName.endsWith(".unified_v52") ||
             context.packageName.endsWith(".visionmission")
 
+    private fun usesFinalIdentityCurrencyPipeline(): Boolean =
+        isIdentityCandidatePackage() || isSanetraProductionPackage()
+
+    // Diagnostic broadcast receiver remains limited to candidate/test builds.
     private fun isCandidatePackage(): Boolean =
-        context.packageName.endsWith(".candidate") || context.packageName.contains(".candidate_") || isIdentityCandidatePackage()
+        context.packageName.endsWith(".candidate") ||
+            context.packageName.contains(".candidate_") ||
+            isIdentityCandidatePackage()
 
     fun register(flutterEngine: FlutterEngine) {
         channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
@@ -104,7 +116,7 @@ class CurrencyPlatformChannel(
     private fun handleInitModels(call: MethodCall, result: MethodChannel.Result) {
         backgroundExecutor.execute {
             try {
-                val isCandidateApp = isCandidatePackage()
+                val isCandidateApp = isCandidatePackage() || isSanetraProductionPackage()
                 val defaultCoin = if (isCandidateApp) {
                     "assets/models/currency/candidates/indian_coin_phase4n_candidate.onnx"
                 } else {
@@ -118,8 +130,8 @@ class CurrencyPlatformChannel(
 
                 // Strict flavor isolation: production flavor cannot load candidate models or candidate post-processing.
                 // Unified / identity-candidate packages always enforce the candidate detector models unless forced to baseline.
-                val forceProdBaseline = isCandidateApp && (call.argument<Boolean>("forceProductionBaseline") == true)
-                val enforceIdentityDefaults = isIdentityCandidatePackage() && !forceProdBaseline
+                val forceProdBaseline = !isSanetraProductionPackage() && isCandidateApp && (call.argument<Boolean>("forceProductionBaseline") == true)
+                val enforceIdentityDefaults = usesFinalIdentityCurrencyPipeline() && !forceProdBaseline
                 val coinModelArg = when {
                     enforceIdentityDefaults -> defaultCoin
                     isCandidateApp -> call.argument<String>("coinModelAsset") ?: defaultCoin
@@ -143,9 +155,10 @@ class CurrencyPlatformChannel(
                 val coinFilePath = resolveModelPath(coinModelArg, coinFallback)
                 val banknoteFilePath = resolveModelPath(banknoteModelArg, banknoteFallback)
 
-                val useIdentityVerifiers = isIdentityCandidatePackage() && !forceProdBaseline
+                val useIdentityVerifiers = usesFinalIdentityCurrencyPipeline() && !forceProdBaseline
                 val isN5Only = context.packageName.endsWith(".identitycandidate_n5") ||
-                    context.packageName.endsWith(".visionmission")
+                    context.packageName.endsWith(".visionmission") ||
+                    isSanetraProductionPackage()
                 val isV2 = context.packageName.endsWith(".identitycandidate_v2")
                 val noteVerifierPath = if (useIdentityVerifiers) {
                     when {
@@ -179,6 +192,24 @@ class CurrencyPlatformChannel(
                         )
                     }
                 } else null
+
+                if (isSanetraProductionPackage()) {
+                    val finalProfileValid =
+                        enableCandidateMode &&
+                        coinModelArg.endsWith("indian_coin_phase4n_candidate.onnx") &&
+                        banknoteModelArg.endsWith("indian_banknote_phase4l_candidate.onnx") &&
+                        noteVerifierPath?.endsWith("n5_note_verifier.onnx") == true &&
+                        coinVerifierPath?.endsWith("indian_coin_verifier.onnx") == true
+                    if (!finalProfileValid) {
+                        throw IllegalStateException(
+                            "Sanetra production currency profile mismatch. Refusing to start with baseline or incomplete models."
+                        )
+                    }
+                    Log.i(
+                        "SanetraCurrency",
+                        "Activated validated final profile: Phase4L banknote + Phase4N coin + N5 note verifier + Phase4O10 coin verifier"
+                    )
+                }
 
                 synchronized(this) {
                     detector?.close()
