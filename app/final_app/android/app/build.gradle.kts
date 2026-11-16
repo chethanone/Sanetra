@@ -1,11 +1,20 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+
 android {
-    namespace = "com.visionassistant.vision_assistant"
+    namespace = "com.sanetra.assistivevision"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -15,8 +24,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.visionassistant.vision_assistant"
+        applicationId = "com.sanetra.assistivevision"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
@@ -38,65 +46,78 @@ android {
     productFlavors {
         create("production") {
             dimension = "mode"
-            applicationId = "com.visionassistant.vision_assistant"
-            manifestPlaceholders["appLabel"] = "Vision Assistant"
-            resValue("string", "app_name", "Vision Assistant")
+            applicationId = "com.sanetra.assistivevision"
+            manifestPlaceholders["appLabel"] = "Sanetra"
+            resValue("string", "app_name", "Sanetra")
         }
         create("candidate") {
             dimension = "mode"
-            applicationId = "com.visionassistant.vision_assistant.candidate"
-            manifestPlaceholders["appLabel"] = "VisionMission Candidate"
-            resValue("string", "app_name", "VisionMission Candidate")
+            applicationId = "com.sanetra.assistivevision.candidate"
+            manifestPlaceholders["appLabel"] = "Sanetra Candidate"
+            resValue("string", "app_name", "Sanetra Candidate")
         }
         create("candidate_d3") {
             dimension = "mode"
-            applicationId = "com.visionassistant.vision_assistant.candidate_d3"
+            applicationId = "com.sanetra.assistivevision.candidate_d3"
             manifestPlaceholders["appLabel"] = "VisionMission D3"
             resValue("string", "app_name", "VisionMission D3")
         }
         create("candidate_d4") {
             dimension = "mode"
-            applicationId = "com.visionassistant.vision_assistant.candidate_d4"
+            applicationId = "com.sanetra.assistivevision.candidate_d4"
             manifestPlaceholders["appLabel"] = "VisionMission D4"
             resValue("string", "app_name", "VisionMission D4")
         }
         create("identitycandidate") {
             dimension = "mode"
-            applicationId = "com.visionassistant.vision_assistant.identitycandidate"
+            applicationId = "com.sanetra.assistivevision.identitycandidate"
             manifestPlaceholders["appLabel"] = "VisionMission Identity"
             resValue("string", "app_name", "VisionMission Identity")
         }
         create("identitycandidate_v2") {
             dimension = "mode"
-            applicationId = "com.visionassistant.vision_assistant.identitycandidate_v2"
+            applicationId = "com.sanetra.assistivevision.identitycandidate_v2"
             manifestPlaceholders["appLabel"] = "VisionMission Identity V2"
             resValue("string", "app_name", "VisionMission Identity V2")
         }
         create("identitycandidate_n5") {
             dimension = "mode"
-            applicationId = "com.visionassistant.vision_assistant.identitycandidate_n5"
+            applicationId = "com.sanetra.assistivevision.identitycandidate_n5"
             manifestPlaceholders["appLabel"] = "VisionMission N5"
             resValue("string", "app_name", "VisionMission N5")
         }
         create("unified_v52") {
             dimension = "mode"
-            applicationId = "com.visionassistant.vision_assistant.unified_v52"
+            applicationId = "com.sanetra.assistivevision.unified_v52"
             manifestPlaceholders["appLabel"] = "VisionMission 5.2"
             resValue("string", "app_name", "VisionMission 5.2")
         }
         create("visionmission") {
             dimension = "mode"
-            applicationId = "com.visionassistant.vision_assistant.visionmission"
+            applicationId = "com.sanetra.assistivevision"
             manifestPlaceholders["appLabel"] = "Sanetra"
             resValue("string", "app_name", "Sanetra")
         }
     }
 
+    signingConfigs {
+        if (keystorePropertiesFile.exists()) {
+            create("release") {
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (keystorePropertiesFile.exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

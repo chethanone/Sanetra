@@ -1,4 +1,4 @@
-package com.visionassistant.vision_assistant
+﻿package com.sanetra.assistivevision
 
 import android.content.Context
 import android.content.pm.PackageManager

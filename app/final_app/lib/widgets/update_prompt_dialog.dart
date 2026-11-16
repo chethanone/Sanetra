@@ -9,11 +9,13 @@ class UpdatePromptDialog extends StatefulWidget {
     required this.manifest,
     required this.updateService,
     required this.onLater,
+    this.isMigration = false,
   });
 
   final UpdateManifest manifest;
   final AppUpdateService updateService;
   final VoidCallback onLater;
+  final bool isMigration;
 
   @override
   State<UpdatePromptDialog> createState() => _UpdatePromptDialogState();
@@ -109,6 +111,17 @@ class _UpdatePromptDialogState extends State<UpdatePromptDialog> {
                   height: 1.4,
                 ),
               ),
+              if (widget.isMigration) ...[
+                const SizedBox(height: 12),
+                const Text(
+                  "This version uses Sanetra's new application identity. It installs separately from v1.0.0. Your existing v1 installation and its local data remain untouched.",
+                  style: TextStyle(
+                    color: Color(0xFF90CAF9),
+                    fontSize: 14,
+                    height: 1.4,
+                  ),
+                ),
+              ],
               if (_isUpdating) ...[
                 const SizedBox(height: 16),
                 LinearProgressIndicator(

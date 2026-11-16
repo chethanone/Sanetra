@@ -7,9 +7,10 @@ import 'package:vision_assistant/services/app_update_service.dart';
 import 'package:vision_assistant/widgets/update_prompt_dialog.dart';
 
 String _validManifestJson({
-  String version = '1.0.1',
-  int versionCode = 2,
-  int minSupported = 1,
+  String version = '2.0.1',
+  int versionCode = 3,
+  int minSupported = 2,
+  String packageName = 'com.sanetra.assistivevision',
   String arch = 'arm64-v8a',
   String sha256 =
       '0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF',
@@ -19,6 +20,7 @@ String _validManifestJson({
   "version": "$version",
   "versionCode": $versionCode,
   "minimumSupportedVersionCode": $minSupported,
+  "packageName": "$packageName",
   "platform": "android",
   "architecture": "$arch",
   "releaseType": "stable",
@@ -31,9 +33,9 @@ String _validManifestJson({
 }
 
 const _installedV1 = InstalledAppInfo(
-  packageName: 'com.visionassistant.vision_assistant.visionmission',
-  versionName: '1.0.0',
-  versionCode: 1,
+  packageName: 'com.sanetra.assistivevision',
+  versionName: '2.0.0',
+  versionCode: 2,
   supportedAbis: ['arm64-v8a', 'armeabi-v7a'],
 );
 
@@ -61,15 +63,36 @@ void main() {
       await svc.dispose();
     });
 
+    test('Package mismatch classifies as migrationAvailable rather than in-place update', () async {
+      final svc = AppUpdateService(
+        checkConnectivity: () async => true,
+        getInstalledAppInfo: () async => const InstalledAppInfo(
+          packageName: 'com.visionassistant.vision_assistant.visionmission',
+          versionName: '1.0.0',
+          versionCode: 1,
+          supportedAbis: ['arm64-v8a'],
+        ),
+        fetchManifest: (_, _) async => _validManifestJson(
+          version: '2.0.0',
+          versionCode: 2,
+          minSupported: 1,
+          packageName: 'com.sanetra.assistivevision',
+        ),
+      );
+      final res = await svc.checkForUpdate(force: true);
+      expect(res.status, UpdateCheckStatus.migrationAvailable);
+      await svc.dispose();
+    });
+
     test('Higher compatible versionCode returns updateAvailable', () async {
       final svc = AppUpdateService(
         checkConnectivity: () async => true,
         getInstalledAppInfo: () async => _installedV1,
-        fetchManifest: (_, _) async => _validManifestJson(version: '1.0.1', versionCode: 2),
+        fetchManifest: (_, _) async => _validManifestJson(version: '2.0.1', versionCode: 3),
       );
       final res = await svc.checkForUpdate(force: true);
       expect(res.status, UpdateCheckStatus.updateAvailable);
-      expect(res.manifest?.version, '1.0.1');
+      expect(res.manifest?.version, '2.0.1');
       await svc.dispose();
     });
 
@@ -234,7 +257,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('A new Sanetra update is available'), findsOneWidget);
-      expect(find.text('Version: 1.0.1'), findsOneWidget);
+      expect(find.text('Version: 2.0.1'), findsOneWidget);
       expect(find.text('Update now'), findsOneWidget);
       expect(find.text('Later'), findsOneWidget);
 
@@ -242,7 +265,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(dismissed, isTrue);
-      expect(svc.isVersionDismissed(2), isTrue);
+      expect(svc.isVersionDismissed(3), isTrue);
       await svc.dispose();
     });
   });

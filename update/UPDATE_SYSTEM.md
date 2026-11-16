@@ -12,6 +12,7 @@ Sanetra runs **100% offline** for all currency recognition, OCR, flashlight, and
 - **Flutter Service:** `lib/services/app_update_service.dart`
   - Enforces HTTPS-only URLs under `github.com/chethanone/Sanetra` / `raw.githubusercontent.com/chethanone/Sanetra`.
   - Compares numeric `versionCode` (never string comparison).
+  - Validates `packageName` (`com.sanetra.assistivevision` vs legacy `com.visionassistant.vision_assistant.visionmission`), returning `migrationAvailable` when a newer release uses a different Android package ID.
   - Validates architecture (`arm64-v8a`), `minimumSupportedVersionCode`, and 64-hex SHA-256.
   - Debounces and throttles checks (6-hour automatic cooldown; skipped during active camera/OCR capture).
-- **Accessible Prompt:** `lib/widgets/update_prompt_dialog.dart` announces `"A new Sanetra update is available."` once per discovered version using `SpeechService.enqueueShortAnnouncement`.
+- **Accessible Prompt:** `lib/widgets/update_prompt_dialog.dart` announces `"A new Sanetra update is available."` (or migration guidance when `isMigration` is true) once per discovered version using `SpeechService.enqueueShortAnnouncement`.

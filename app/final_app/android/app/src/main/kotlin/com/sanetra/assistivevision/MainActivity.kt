@@ -1,4 +1,4 @@
-package com.visionassistant.vision_assistant
+﻿package com.sanetra.assistivevision
 
 import android.content.BroadcastReceiver
 import android.content.Context

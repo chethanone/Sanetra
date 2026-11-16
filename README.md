@@ -5,16 +5,17 @@
 Sanetra helps users identify Indian currency and read printed text using an Android phone. Currency recognition, OCR, and speech run on the device; an internet connection is used only for optional app-update checks and downloading a new release.
 
 <p align="center">
-  <a href="https://github.com/chethanone/Sanetra/releases/download/v1.0.0/Sanetra-v1.0.0-arm64.apk">
-    <img alt="Download Sanetra v1.0.0" src="https://img.shields.io/badge/Download-Android%20APK-111111?style=for-the-badge&logo=android&logoColor=white">
+  <a href="https://github.com/chethanone/Sanetra/releases/download/v2.0.0/Sanetra-v2.0.0-arm64.apk">
+    <img alt="Download Sanetra v2.0.0" src="https://img.shields.io/badge/Download-Android%20APK-111111?style=for-the-badge&logo=android&logoColor=white">
   </a>
-  <a href="https://github.com/chethanone/Sanetra/releases/tag/v1.0.0">
-    <img alt="Release v1.0.0" src="https://img.shields.io/badge/Release-v1.0.0-555555?style=for-the-badge">
+  <a href="https://github.com/chethanone/Sanetra/releases/tag/v2.0.0">
+    <img alt="Release v2.0.0" src="https://img.shields.io/badge/Release-v2.0.0-555555?style=for-the-badge">
   </a>
 </p>
 
-> **Current Android release:** v1.0.0 (versionCode 1) · arm64-v8a  
-> **Package ID:** `com.visionassistant.vision_assistant.visionmission`
+> **Current Android release:** v2.0.0 (versionCode 2) · arm64-v8a  
+> **Package ID:** `com.sanetra.assistivevision`  
+> **Upgrading from v1.0.0:** `v2.0.0` migrates the Android application ID from `com.visionassistant.vision_assistant.visionmission` to `com.sanetra.assistivevision` with permanent release signing. Install `v2.0.0` as a fresh app (Android installs it alongside `v1.0.0`, after which `v1.0.0` can be uninstalled). Future `v2.x+` updates upgrade in place.
 
 ## What it does
 
@@ -53,7 +54,7 @@ The active model files and their technical metadata are listed in [Model Catalog
 
 ## Download and install
 
-**[Download Sanetra v1.0.0 for Android (arm64-v8a)](https://github.com/chethanone/Sanetra/releases/download/v1.0.0/Sanetra-v1.0.0-arm64.apk)**
+**[Download Sanetra v2.0.0 for Android (arm64-v8a)](https://github.com/chethanone/Sanetra/releases/download/v2.0.0/Sanetra-v2.0.0-arm64.apk)**
 
 1. Download the APK from the release link above.
 2. Open the downloaded APK on an Android arm64 device.
@@ -63,7 +64,7 @@ The active model files and their technical metadata are listed in [Model Catalog
 
 Android requires user confirmation to install an APK. Sanetra does not silently install updates.
 
-**Release details:** [v1.0.0 release notes and APK](https://github.com/chethanone/Sanetra/releases/tag/v1.0.0) · [All releases](https://github.com/chethanone/Sanetra/releases)
+**Release details:** [v2.0.0 release notes and APK](https://github.com/chethanone/Sanetra/releases/tag/v2.0.0) · [All releases](https://github.com/chethanone/Sanetra/releases)
 
 ## Build from source
 
@@ -78,10 +79,10 @@ flutter test
 flutter build apk --release --flavor visionmission -t lib/main.dart
 ```
 
-The Android application ID is intentionally retained for compatible in-place upgrades:
+The current Android application ID is:
 
 ```text
-com.visionassistant.vision_assistant.visionmission
+com.sanetra.assistivevision
 ```
 
 ## Project documentation
@@ -105,7 +106,7 @@ The primary validation device used during development was a Nothing Phone (3a) P
 
 ### Android release signing
 
-The APK is distributed directly through GitHub Releases, not through Google Play. This build uses the project's configured local/development signing identity. Future in-app upgrades must use the same signing certificate and a higher Android `versionCode`; keep the signing keystore backed up securely and never commit it to the repository.
+The APK is distributed directly through GitHub Releases, not through Google Play. Beginning with `v2.0.0` (`com.sanetra.assistivevision`), release builds are signed with a dedicated permanent release keystore (`CN=Sanetra Release`, SHA-256 certificate fingerprint `b3986507f0092f9296342fca8fe12c7c6f2e63d4e9516399690be422149a1389`). Future in-app upgrades must use the same signing certificate and a higher Android `versionCode`; keep the signing keystore backed up securely and never commit it to the repository.
 
 ## License and reuse
 

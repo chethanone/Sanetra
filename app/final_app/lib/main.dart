@@ -237,7 +237,8 @@ class _CameraScreenState extends State<CameraScreen>
   Future<void> _checkForAppUpdate() async {
     if (!_canRunUpdateCheck()) return;
     final res = await _appUpdateService.checkForUpdate();
-    if (res.status == UpdateCheckStatus.updateAvailable) {
+    if (res.status == UpdateCheckStatus.updateAvailable ||
+        res.status == UpdateCheckStatus.migrationAvailable) {
       _handleUpdateAvailable(res);
     }
   }
@@ -267,6 +268,7 @@ class _CameraScreenState extends State<CameraScreen>
         builder: (ctx) => UpdatePromptDialog(
           manifest: manifest,
           updateService: _appUpdateService,
+          isMigration: result.status == UpdateCheckStatus.migrationAvailable,
           onLater: () => _appUpdateService.dismissVersion(manifest.versionCode),
         ),
       ).whenComplete(() {

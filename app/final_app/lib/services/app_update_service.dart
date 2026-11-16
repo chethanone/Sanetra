@@ -11,6 +11,7 @@ enum UpdateCheckStatus {
   busy,
   upToDate,
   updateAvailable,
+  migrationAvailable,
   incompatible,
   invalidManifest,
   networkError,
@@ -42,6 +43,7 @@ class UpdateManifest {
     required this.sha256,
     required this.releaseNotes,
     required this.releaseUrl,
+    this.packageName,
     this.downloadUrl,
   });
 
@@ -55,6 +57,7 @@ class UpdateManifest {
   final String sha256;
   final String releaseNotes;
   final String releaseUrl;
+  final String? packageName;
   final String? downloadUrl;
 
   static final RegExp _sha256Regex = RegExp(r'^[A-Fa-f0-9]{64}$');
@@ -93,6 +96,7 @@ class UpdateManifest {
       final sha256 = (decoded['sha256'] as String?)?.trim() ?? '';
       final releaseNotes = (decoded['releaseNotes'] as String?)?.trim() ?? '';
       final releaseUrl = (decoded['releaseUrl'] as String?)?.trim() ?? '';
+      final packageName = (decoded['packageName'] as String?)?.trim();
       final downloadUrl = (decoded['downloadUrl'] as String?)?.trim();
 
       if (version.isEmpty ||
@@ -126,6 +130,9 @@ class UpdateManifest {
         sha256: sha256.toUpperCase(),
         releaseNotes: releaseNotes,
         releaseUrl: releaseUrl,
+        packageName: (packageName != null && packageName.isNotEmpty)
+            ? packageName
+            : null,
         downloadUrl: downloadUrl,
       );
 
@@ -274,7 +281,8 @@ class AppUpdateService {
       _debounceTimer = Timer(const Duration(seconds: 2), () async {
         if (canCheckNow != null && !canCheckNow()) return;
         final res = await checkForUpdate();
-        if (res.status == UpdateCheckStatus.updateAvailable &&
+        if ((res.status == UpdateCheckStatus.updateAvailable ||
+                res.status == UpdateCheckStatus.migrationAvailable) &&
             res.manifest != null &&
             !isVersionDismissed(res.manifest!.versionCode)) {
           onUpdateFound(res);
@@ -360,6 +368,16 @@ class AppUpdateService {
         installed: installed,
         reason:
             'Installed versionCode ${installed.versionCode} below minimum ${manifest.minimumSupportedVersionCode}',
+      );
+    }
+    if (manifest.packageName != null &&
+        manifest.packageName != installed.packageName) {
+      return UpdateCheckResult(
+        status: UpdateCheckStatus.migrationAvailable,
+        manifest: manifest,
+        installed: installed,
+        reason:
+            'Package identity changed (${installed.packageName} -> ${manifest.packageName}); installs separately.',
       );
     }
     return UpdateCheckResult(
@@ -486,10 +504,9 @@ class AppUpdateService {
         const ['arm64-v8a'];
     return InstalledAppInfo(
       packageName:
-          map?['packageName']?.toString() ??
-          'com.visionassistant.vision_assistant.visionmission',
-      versionName: map?['versionName']?.toString() ?? '1.0.0',
-      versionCode: (map?['versionCode'] as num?)?.toInt() ?? 1,
+          map?['packageName']?.toString() ?? 'com.sanetra.assistivevision',
+      versionName: map?['versionName']?.toString() ?? '2.0.0',
+      versionCode: (map?['versionCode'] as num?)?.toInt() ?? 2,
       supportedAbis: abis,
     );
   }
