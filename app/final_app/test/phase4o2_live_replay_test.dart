@@ -257,7 +257,11 @@ void main() {
     for (final r in results) {
       expect(r['new_wrong_spoken_totals'], 0, reason: '${r['scenario']} spoke a wrong total');
     }
-  });
+  }, skip: !File('$_dir\\scenario_01_logcat.txt').existsSync() ||
+      !File('$_dir\\scenario_02_logcat.txt').existsSync() ||
+      !File('$_dir\\scenario_03_logcat.txt').existsSync()
+      ? 'Requires local Phase 4O physical-device logcat fixtures, which are not distributed in the public source repository.'
+      : false);
 
   test('Phase 4O.3.1 replay of Phase 4O.3 Scene 4 isolated coin (#383-#404)', () {
     final lines = File(r'C:\VisionMission\experiments\phase4o\live_camera_4o3\logs\scene4_raw.log')
@@ -311,6 +315,8 @@ void main() {
     expect(incompleteCount, 0);
     expect(wrongConfirmed, 0);
     expect(confirmedTwoCount, greaterThanOrEqualTo(15));
-  });
+  }, skip: !File(r'C:\\VisionMission\\experiments\\phase4o\\live_camera_4o3\\logs\\scene4_raw.log').existsSync()
+      ? 'Requires local Phase 4O.3 physical-device logcat fixture, which is not distributed in the public source repository.'
+      : false);
 }
 
