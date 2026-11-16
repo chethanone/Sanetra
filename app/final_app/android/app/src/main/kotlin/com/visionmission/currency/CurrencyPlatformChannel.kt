@@ -128,8 +128,8 @@ class CurrencyPlatformChannel(
                     "assets/models/currency/indian_banknote_yolov8n.onnx"
                 }
 
-                // Strict flavor isolation: production flavor cannot load candidate models or candidate post-processing.
-                // Unified / identity-candidate packages always enforce the candidate detector models unless forced to baseline.
+                // The published Sanetra package and identity-validation flavors use the
+                // validated final detector/verifier pipeline. Experimental flavors remain isolated.
                 val forceProdBaseline = !isSanetraProductionPackage() && isCandidateApp && (call.argument<Boolean>("forceProductionBaseline") == true)
                 val enforceIdentityDefaults = usesFinalIdentityCurrencyPipeline() && !forceProdBaseline
                 val coinModelArg = when {
