@@ -331,7 +331,14 @@ class CurrencyModelService {
         'numThreads': 4,
       });
 
-      _isCandidateMode = (res?['isCandidateMode'] as bool?) ?? candidate;
+      final bool nativeCandidateMode = res?['isCandidateMode'] == true;
+      if (candidate && !forceProductionBaseline && !nativeCandidateMode) {
+        throw StateError(
+          'Sanetra refused to start currency recognition: Android did not activate the validated final currency pipeline. '
+          'This prevents fallback to the legacy detector without identity verification.',
+        );
+      }
+      _isCandidateMode = nativeCandidateMode;
       debugPrint('[CURRENCY-SERVICE] Native models initialized successfully (activeCandidateMode=$_isCandidateMode): $res');
       _isLoaded = true;
     } catch (e, stackTrace) {
