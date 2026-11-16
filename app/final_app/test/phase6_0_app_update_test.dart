@@ -84,6 +84,37 @@ void main() {
       await svc.dispose();
     });
 
+    test('Migration install passes the target Sanetra package to Android installer', () async {
+      final tempDir = await Directory.systemTemp.createTemp('sanetra_migration_');
+      try {
+        final manifest = UpdateManifest.tryParse(
+          _validManifestJson(
+            version: '2.0.0',
+            versionCode: 2,
+            minSupported: 1,
+            packageName: 'com.sanetra.assistivevision',
+          ),
+        )!;
+        String? installerTargetPackage;
+        final svc = AppUpdateService(
+          getCacheDir: () async => tempDir,
+          downloadApk: (_, dest, _, _) async => dest.writeAsBytes([1, 2, 3]),
+          computeSha256: (_) async => manifest.sha256,
+          launchInstaller: (path, expectedPackageName) async {
+            installerTargetPackage = expectedPackageName;
+            return {'started': true, 'isMigration': true};
+          },
+        );
+
+        final res = await svc.downloadAndInstall(manifest);
+        expect(res.success, isTrue);
+        expect(installerTargetPackage, 'com.sanetra.assistivevision');
+        await svc.dispose();
+      } finally {
+        await tempDir.delete(recursive: true);
+      }
+    });
+
     test('Higher compatible versionCode returns updateAvailable', () async {
       final svc = AppUpdateService(
         checkConnectivity: () async => true,
@@ -166,7 +197,7 @@ void main() {
             onProg?.call(1.0);
           },
           computeSha256: (_) async => 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF',
-          launchInstaller: (_) async => {'started': true},
+          launchInstaller: (_, _) async => {'started': true},
         );
 
         final res = await svc.downloadAndInstall(manifest);
@@ -191,7 +222,7 @@ void main() {
             onProg?.call(1.0);
           },
           computeSha256: (_) async => manifest.sha256,
-          launchInstaller: (_) async => {'started': true},
+          launchInstaller: (_, _) async => {'started': true},
         );
         expect((await svcOk.downloadAndInstall(manifest)).success, isTrue);
 
@@ -199,7 +230,7 @@ void main() {
           getCacheDir: () async => tempDir,
           downloadApk: (_, dest, _, _) async => dest.writeAsBytes([10, 20, 30]),
           computeSha256: (_) async => manifest.sha256,
-          launchInstaller: (_) async => {'started': false, 'needsInstallPermission': true},
+          launchInstaller: (_, _) async => {'started': false, 'needsInstallPermission': true},
         );
         final permRes = await svcPerm.downloadAndInstall(manifest);
         expect(permRes.success, isFalse);
@@ -209,7 +240,7 @@ void main() {
           getCacheDir: () async => tempDir,
           downloadApk: (_, dest, _, _) async => dest.writeAsBytes([10, 20, 30]),
           computeSha256: (_) async => manifest.sha256,
-          launchInstaller: (_) async => {'started': false},
+          launchInstaller: (_, _) async => {'started': false},
         );
         final cancelRes = await svcCancel.downloadAndInstall(manifest);
         expect(cancelRes.success, isFalse);
@@ -227,7 +258,7 @@ void main() {
       final manifest = UpdateManifest.tryParse(_validManifestJson())!;
       var dismissed = false;
       final svc = AppUpdateService(
-        launchInstaller: (_) async => {'started': true},
+        launchInstaller: (_, _) async => {'started': true},
       );
 
       await tester.pumpWidget(
