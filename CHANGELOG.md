@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.2.0.1 (2026-11-19)
+- **Splash & Loading Icon Alignment:** Replaced the legacy loading screen artwork (`drawable-nodpi/splash_logo.png`) with the official high-contrast Sanetra Vision Rupee branding centered on a pure black background (`#000000`).
+- **Android 12+ (API 31+) SplashScreen Support:** Added dedicated Android 12+ theme configurations (`values-v31` and `values-night-v31`), binding `windowSplashScreenAnimatedIcon` and `windowSplashScreenBackground` directly to the new Vision Rupee logo.
+- **Visual Consistency:** Resolves the discrepancy where the app launcher icon displayed the new Vision Rupee branding but launching the app displayed the legacy icon during loading.
+- **Core Pipeline Preservation:** Strict icon and theme asset release. All currency models, ONNX runtime configurations, OCR engines, offline speech assets, volume gestures, anti-spoof checks, and update mechanisms remain 100% identical and unchanged.
+
 ## v2.2.0 (2026-11-19)
 - **Pipeline Resource Lifecycle & Native Leak Fixes:** Refactored Android native camera frame processing to ensure all intermediate `Bitmap` allocations and ONNX `OnnxTensor` instances are deterministically closed in `finally` blocks, preventing GPU memory fragmentation and heap growth during extended continuous scanning sessions.
 - **Zero-Heap Direct Tensor Population:** Eliminated intermediate `FloatArray` heap allocations in native preprocessing (`CurrencyDetector.kt` and `PreprocessOutput.kt`); normalized pixel tensors are now streamed directly into native memory buffers.

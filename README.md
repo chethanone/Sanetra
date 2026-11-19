@@ -5,17 +5,17 @@
 Sanetra helps users identify Indian currency and read printed text using an Android phone. Currency recognition, OCR, and speech run on the device; an internet connection is used only for optional app-update checks and downloading a new release.
 
 <p align="center">
-  <a href="https://github.com/chethanone/Sanetra/releases/download/v2.2.0/Sanetra-v2.2.0-arm64.apk">
-    <img alt="Download Sanetra v2.2.0" src="https://img.shields.io/badge/Download-Android%20APK-111111?style=for-the-badge&logo=android&logoColor=white">
+  <a href="https://github.com/chethanone/Sanetra/releases/download/v2.2.0.1/Sanetra-v2.2.0.1-arm64.apk">
+    <img alt="Download Sanetra v2.2.0.1" src="https://img.shields.io/badge/Download-Android%20APK-111111?style=for-the-badge&logo=android&logoColor=white">
   </a>
-  <a href="https://github.com/chethanone/Sanetra/releases/tag/v2.2.0">
-    <img alt="Release v2.2.0" src="https://img.shields.io/badge/Release-v2.2.0-555555?style=for-the-badge">
+  <a href="https://github.com/chethanone/Sanetra/releases/tag/v2.2.0.1">
+    <img alt="Release v2.2.0.1" src="https://img.shields.io/badge/Release-v2.2.0.1-555555?style=for-the-badge">
   </a>
 </p>
 
-> **Current Android release:** v2.2.0 (versionCode 11) · arm64-v8a  
+> **Current Android release:** v2.2.0.1 (versionCode 12) · arm64-v8a  
 > **Package ID:** `com.sanetra.assistivevision`  
-> **Upgrading:** Existing `v2.0.0`–`v2.1.3` installations (`com.sanetra.assistivevision`) upgrade cleanly in place via the built-in update checker. Legacy `v1.0.0` (`com.visionassistant.vision_assistant.visionmission`) users must perform the first `v2.x` installation manually as a separate app.
+> **Upgrading:** Existing `v2.0.0`–`v2.2.0` installations (`com.sanetra.assistivevision`) upgrade cleanly in place via the built-in update checker. Legacy `v1.0.0` (`com.visionassistant.vision_assistant.visionmission`) users must perform the first `v2.x` installation manually as a separate app.
 
 ## What it does
 
@@ -54,7 +54,7 @@ The active model files and their technical metadata are listed in [Model Catalog
 
 ## Download and install
 
-**[Download Sanetra v2.2.0 for Android (arm64-v8a)](https://github.com/chethanone/Sanetra/releases/download/v2.2.0/Sanetra-v2.2.0-arm64.apk)**
+**[Download Sanetra v2.2.0 for Android (arm64-v8a)](https://github.com/chethanone/Sanetra/releases/download/v2.2.0.1/Sanetra-v2.2.0.1-arm64.apk)**
 
 1. Download the APK from the release link above.
 2. Open the downloaded APK on an Android arm64 device.
@@ -64,7 +64,7 @@ The active model files and their technical metadata are listed in [Model Catalog
 
 Android requires user confirmation to install an APK. Sanetra does not silently install updates.
 
-**Release details:** [v2.2.0 release notes and APK](https://github.com/chethanone/Sanetra/releases/tag/v2.2.0) · [All releases](https://github.com/chethanone/Sanetra/releases) · [Third-party audio notices](THIRD_PARTY_NOTICES.md)
+**Release details:** [v2.2.0 release notes and APK](https://github.com/chethanone/Sanetra/releases/tag/v2.2.0.1) · [All releases](https://github.com/chethanone/Sanetra/releases) · [Third-party audio notices](THIRD_PARTY_NOTICES.md)
 
 ## Build from source
 
