@@ -5,17 +5,17 @@
 Sanetra helps users identify Indian currency and read printed text using an Android phone. Currency recognition, OCR, and speech run on the device; an internet connection is used only for optional app-update checks and downloading a new release.
 
 <p align="center">
-  <a href="https://github.com/chethanone/Sanetra/releases/download/v2.1.2/Sanetra-v2.1.2-arm64.apk">
-    <img alt="Download Sanetra v2.1.2" src="https://img.shields.io/badge/Download-Android%20APK-111111?style=for-the-badge&logo=android&logoColor=white">
+  <a href="https://github.com/chethanone/Sanetra/releases/download/v2.1.3/Sanetra-v2.1.3-arm64.apk">
+    <img alt="Download Sanetra v2.1.3" src="https://img.shields.io/badge/Download-Android%20APK-111111?style=for-the-badge&logo=android&logoColor=white">
   </a>
-  <a href="https://github.com/chethanone/Sanetra/releases/tag/v2.1.2">
-    <img alt="Release v2.1.2" src="https://img.shields.io/badge/Release-v2.1.2-555555?style=for-the-badge">
+  <a href="https://github.com/chethanone/Sanetra/releases/tag/v2.1.3">
+    <img alt="Release v2.1.3" src="https://img.shields.io/badge/Release-v2.1.3-555555?style=for-the-badge">
   </a>
 </p>
 
-> **Current Android release:** v2.1.2 (versionCode 9) · arm64-v8a  
+> **Current Android release:** v2.1.3 (versionCode 10) · arm64-v8a  
 > **Package ID:** `com.sanetra.assistivevision`  
-> **Upgrading:** Existing `v2.0.0`–`v2.1.1` installations (`com.sanetra.assistivevision`) upgrade cleanly in place via the built-in update checker. Legacy `v1.0.0` (`com.visionassistant.vision_assistant.visionmission`) users must perform the first `v2.x` installation manually as a separate app.
+> **Upgrading:** Existing `v2.0.0`–`v2.1.2` installations (`com.sanetra.assistivevision`) upgrade cleanly in place via the built-in update checker. Legacy `v1.0.0` (`com.visionassistant.vision_assistant.visionmission`) users must perform the first `v2.x` installation manually as a separate app.
 
 ## What it does
 

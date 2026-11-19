@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.1.3 (2026-11-19)
+- **High-Contrast Vision Rupee Launcher Icon:** Replaced the legacy Android application launcher icon across all screen densities (`mdpi`, `hdpi`, `xhdpi`, `xxhdpi`, `xxxhdpi`, `anydpi-v26`) with the official Sanetra Vision Rupee branding.
+- **Adaptive Icon & Safe-Bound Alignment:** Scaled and centered the high-contrast white eye-and-rupee symbol on a pure black background (`#000000`), ensuring full visibility with zero edge clipping across both circular and rounded-rectangle launcher masks.
+- **Android 13+ Themed Icon Support:** Added dedicated monochrome vector layer (`ic_launcher_monochrome`) to support Android 13+ themed/tinted app icons on compatible Pixel and Nothing OS launchers.
+- **Core Pipeline Preservation:** Strict icon-only release. All currency recognition models, ONNX model hashes, OCR engines, offline speech assets, volume gestures, and update mechanisms remain 100% identical and unchanged.
+
 ## v2.1.2 (2026-11-19)
 - **Faster, Smoother Foreground APK Downloads:** Throttled download progress callbacks to at most 1 update per 250 ms (maximum 4 updates per second) with a minimum progress delta of 0.5%, reducing foreground dialog UI rebuilds by over 98% and maintaining full wire download speed while visible.
 - **Background APK Checksum Verification:** Offloaded SHA-256 integrity calculation to a dedicated background `ioExecutor` in `AppUpdateChannel.kt`, eliminating the 1.5–3.0 second main-thread UI freeze upon download completion.
