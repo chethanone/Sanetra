@@ -345,6 +345,13 @@ class SpeechService {
 
       sw.stop();
       _initialized = true;
+      if (_bisayaInitOverride == null) {
+        unawaited(
+          _bisayaChannel
+              .invokeMethod<dynamic>('preloadSelector')
+              .catchError((_) => null),
+        );
+      }
       debugPrint(
         '[TTS-AUDIT] Init=${sw.elapsedMilliseconds}ms engine=$_defaultEngine '
         'vol=$volRes pitch=$pitchRes rate=$rateRes langRes=1 voiceRes=1 '
@@ -404,6 +411,20 @@ class SpeechService {
     }
   }
 
+  String _mapLanguageToSelectorClip(String lang) {
+    switch (lang) {
+      case 'ceb-PH':
+        return 'confirm_bisaya';
+      case 'kn-IN':
+        return 'confirm_kn';
+      case 'hi-IN':
+        return 'confirm_hi';
+      case 'en-IN':
+      default:
+        return 'confirm_en';
+    }
+  }
+
   /// Preemptive selector announcement path: immediately invalidates older
   /// generations, interrupts active speech, and speaks only the latest
   /// selected language without queuing stale selections.
@@ -421,14 +442,14 @@ class SpeechService {
     final invalidateMs = sw.elapsedMilliseconds + keyAgeMs;
     _selectorGenerationId = generationId;
     _speechEpoch++;
-    _activeUtteranceToken = ++_utteranceTokenSeq;
+    final token = ++_utteranceTokenSeq;
+    _activeUtteranceToken = token;
 
     final wasActive = _isSpeaking || _activeUtteranceCompleter != null;
     if (wasActive) {
       _pendingCancelReason = 'selector_preempted';
     }
     _isSpeaking = false;
-    _activeSelectorTrace = null;
     _completeActiveUtterance();
 
     _pendingSelectorRequest = _SelectorSpeechRequest(
@@ -441,48 +462,27 @@ class SpeechService {
       invalidateMs: invalidateMs,
     );
 
+    // Immediately stop any active selector audio in native hardware
+    unawaited(
+      _bisayaChannel
+          .invokeMethod<dynamic>('stopSelector')
+          .catchError((_) => null),
+    );
     if (wasActive && _initialized) {
-      unawaited(_stopAllEngines(const Duration(milliseconds: 120)));
+      unawaited(_stopAllEngines(const Duration(milliseconds: 100)));
     }
 
     if (_selectorWorkerRunning) return;
     _selectorWorkerRunning = true;
     try {
       await initialize();
-      if (!_initialized) return;
 
       while (_pendingSelectorRequest != null) {
         final req = _pendingSelectorRequest!;
         _pendingSelectorRequest = null;
         if (req.generationId != _selectorGenerationId) continue;
 
-        final stopDispatchMs = req.sw.elapsedMilliseconds + req.keyAgeMs;
-        if (_isSpeaking || _activeUtteranceCompleter != null) {
-          _pendingCancelReason = 'selector_preempted';
-          _isSpeaking = false;
-          _completeActiveUtterance();
-          if (req.language == 'ceb-PH') {
-            unawaited(_stopAllEngines(const Duration(milliseconds: 120)));
-          } else {
-            try {
-              await _stopAllEngines(const Duration(milliseconds: 120));
-            } catch (_) {}
-          }
-          if (req.generationId != _selectorGenerationId ||
-              _pendingSelectorRequest != null) {
-            continue;
-          }
-        }
-
-        final ok = await _prepareLanguage(req.language);
-        if (req.generationId != _selectorGenerationId ||
-            _pendingSelectorRequest != null) {
-          continue;
-        }
-        if (!ok) continue;
-
-        final token = ++_utteranceTokenSeq;
-        _activeUtteranceToken = token;
+        final clipId = _mapLanguageToSelectorClip(req.language);
         final speakDispatchMs = req.sw.elapsedMilliseconds + req.keyAgeMs;
         _pendingStartStopwatch = req.sw;
         _activeSelectorTrace = _SelectorLatencyTrace(
@@ -493,19 +493,31 @@ class SpeechService {
           keyAgeMs: req.keyAgeMs,
           stateMs: req.stateMs,
           invalidateMs: req.invalidateMs,
-          stopDispatchMs: stopDispatchMs,
+          stopDispatchMs: req.sw.elapsedMilliseconds + req.keyAgeMs,
           speakDispatchMs: speakDispatchMs,
         );
         debugPrint(
           '[TTS-SEL-DISPATCH] gen=${req.generationId} lang=${req.language} '
-          'text="${req.text}" stateMs=${req.stateMs} invalidateMs=${req.invalidateMs} '
-          'stopDispatchMs=$stopDispatchMs speakDispatchMs=$speakDispatchMs',
+          'clip=$clipId text="${req.text}" stateMs=${req.stateMs} invalidateMs=${req.invalidateMs} '
+          'speakDispatchMs=$speakDispatchMs',
         );
-        await _speakChunkGuarded(
-          req.text,
-          _speechEpoch,
-          bisayaClips: req.language == 'ceb-PH' ? const ['confirm_bisaya'] : null,
-        );
+
+        if (_bisayaSpeakOverride != null) {
+          await _bisayaSpeakOverride(req.text, 1.0);
+        } else {
+          try {
+            await _bisayaChannel.invokeMethod<dynamic>('speakSelector', {
+              'clip': clipId,
+              'utteranceId': req.generationId,
+            });
+          } catch (e) {
+            debugPrint(
+              '[TTS-SEL-FALLBACK] speakSelector fallback to _tts for test/env: $e',
+            );
+            await _prepareLanguage(req.language);
+            await _speakChunkGuarded(req.text, _speechEpoch);
+          }
+        }
       }
     } finally {
       _selectorWorkerRunning = false;
@@ -844,8 +856,12 @@ class SpeechService {
         if (!ok) return;
 
         final activeLang = ok ? language : 'en-IN';
-        if (activeLang == 'ceb-PH' && bisayaClips != null && bisayaClips.isNotEmpty) {
-          debugPrint('[TTS-SPEAK] ($activeLang) clips=${bisayaClips.join("+")}');
+        if (activeLang == 'ceb-PH' &&
+            bisayaClips != null &&
+            bisayaClips.isNotEmpty) {
+          debugPrint(
+            '[TTS-SPEAK] ($activeLang) clips=${bisayaClips.join("+")}',
+          );
           await _speakChunkGuarded(cleaned, myEpoch, bisayaClips: bisayaClips);
         } else {
           for (final chunk in chunkText(cleaned)) {
@@ -868,6 +884,7 @@ class SpeechService {
   Future<void> enqueueShortAnnouncement(
     String text, {
     String language = 'en-IN',
+    List<String>? bisayaClips,
   }) async {
     if (_isSelectorOpen) return;
     await initialize();
@@ -883,14 +900,18 @@ class SpeechService {
         final ok = await _prepareLanguage(language);
         if (myEpoch != _speechEpoch || _isSelectorOpen) return;
         final activeLang = ok ? language : 'en-IN';
-        if (!ok && language != 'en-IN') {
+        if (!ok && language != 'en-IN' && language != 'ceb-PH') {
           final fallbackOk = await _prepareLanguage('en-IN');
           if (!fallbackOk || myEpoch != _speechEpoch || _isSelectorOpen) return;
         } else if (!ok) {
           return;
         }
         debugPrint('[TTS-FLASHLIGHT] ($activeLang) "$cleaned"');
-        await _speakChunkGuarded(cleaned, myEpoch);
+        await _speakChunkGuarded(
+          cleaned,
+          myEpoch,
+          bisayaClips: activeLang == 'ceb-PH' ? bisayaClips : null,
+        );
       } catch (e) {
         debugPrint('[TTS-FLASHLIGHT] enqueueShortAnnouncement error: $e');
       } finally {

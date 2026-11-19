@@ -1,4 +1,4 @@
-﻿package com.sanetra.assistivevision
+package com.sanetra.assistivevision
 
 import android.content.Context
 import android.content.Intent
@@ -35,6 +35,7 @@ class AppUpdateChannel(private val context: Context) {
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val ioExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val connectivityManager =
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
 
@@ -62,7 +63,13 @@ class AppUpdateChannel(private val context: Context) {
                         if (path.isNullOrBlank()) {
                             result.success(null)
                         } else {
-                            result.success(computeSha256(File(path)))
+                            val file = File(path)
+                            ioExecutor.execute {
+                                val hash = computeSha256(file)
+                                mainHandler.post {
+                                    result.success(hash)
+                                }
+                            }
                         }
                     }
                     "canRequestPackageInstalls" -> {
@@ -85,7 +92,7 @@ class AppUpdateChannel(private val context: Context) {
                         } else if (expectedPackageName.isNullOrBlank()) {
                             result.success(mapOf("started" to false, "error" to "Missing expected APK package ID"))
                         } else {
-                            result.success(installApk(File(path), expectedPackageName))
+                            installApkAsync(File(path), expectedPackageName, result)
                         }
                     }
                     else -> result.notImplemented()
@@ -229,58 +236,84 @@ class AppUpdateChannel(private val context: Context) {
         }
     }
 
-    private fun installApk(apkFile: File, expectedPackageName: String): Map<String, Any> {
+    private fun installApkAsync(
+        apkFile: File,
+        expectedPackageName: String,
+        result: MethodChannel.Result
+    ) {
         if (!apkFile.exists() || !apkFile.isFile) {
-            return mapOf("started" to false, "error" to "APK file not found")
+            result.success(mapOf("started" to false, "error" to "APK file not found"))
+            return
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             !context.packageManager.canRequestPackageInstalls()
         ) {
-            return mapOf(
-                "started" to false,
-                "needsInstallPermission" to true,
-                "error" to "Install unknown apps permission required"
+            result.success(
+                mapOf(
+                    "started" to false,
+                    "needsInstallPermission" to true,
+                    "error" to "Install unknown apps permission required"
+                )
             )
+            return
         }
         if (expectedPackageName != SANETRA_PACKAGE_NAME) {
-            return mapOf("started" to false, "error" to "Untrusted target package ID")
+            result.success(mapOf("started" to false, "error" to "Untrusted target package ID"))
+            return
         }
-        return try {
-            // Verify the APK against the package ID in the validated release manifest.
-            // A different package is allowed only for the explicit v1 -> v2 migration.
-            val pkgInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.packageManager.getPackageArchiveInfo(
-                    apkFile.absolutePath,
-                    PackageManager.PackageInfoFlags.of(0)
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                context.packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
-            }
-            if (pkgInfo == null || pkgInfo.packageName != expectedPackageName) {
-                return mapOf(
-                    "started" to false,
-                    "error" to "Downloaded APK does not match the expected release package ID"
-                )
-            }
 
-            val uri = FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                apkFile
-            )
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "application/vnd.android.package-archive")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        ioExecutor.execute {
+            try {
+                // Verify the APK against the package ID in the validated release manifest.
+                val pkgInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    context.packageManager.getPackageArchiveInfo(
+                        apkFile.absolutePath,
+                        PackageManager.PackageInfoFlags.of(0)
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
+                }
+
+                if (pkgInfo == null || pkgInfo.packageName != expectedPackageName) {
+                    mainHandler.post {
+                        result.success(
+                            mapOf(
+                                "started" to false,
+                                "error" to "Downloaded APK does not match the expected release package ID"
+                            )
+                        )
+                    }
+                    return@execute
+                }
+
+                mainHandler.post {
+                    try {
+                        val uri = FileProvider.getUriForFile(
+                            context,
+                            "${context.packageName}.fileprovider",
+                            apkFile
+                        )
+                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(uri, "application/vnd.android.package-archive")
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(intent)
+                        val isMigration = expectedPackageName != context.packageName
+                        Log.i(TAG, "Launched Android package installer for ${apkFile.name}; target=$expectedPackageName; migration=$isMigration")
+                        result.success(mapOf("started" to true, "isMigration" to isMigration, "targetPackageName" to expectedPackageName))
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "startActivity failed: ${t.message}")
+                        result.success(mapOf("started" to false, "error" to (t.message ?: "Installer error")))
+                    }
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "Archive validation failed: ${t.message}")
+                mainHandler.post {
+                    result.success(mapOf("started" to false, "error" to (t.message ?: "Validation error")))
+                }
             }
-            context.startActivity(intent)
-            val isMigration = expectedPackageName != context.packageName
-            Log.i(TAG, "Launched Android package installer for ${apkFile.name}; target=$expectedPackageName; migration=$isMigration")
-            mapOf("started" to true, "isMigration" to isMigration, "targetPackageName" to expectedPackageName)
-        } catch (t: Throwable) {
-            Log.w(TAG, "installApk failed: ${t.message}")
-            mapOf("started" to false, "error" to (t.message ?: "Installer error"))
         }
     }
 
@@ -291,5 +324,8 @@ class AppUpdateChannel(private val context: Context) {
         eventChannel = null
         methodChannel?.setMethodCallHandler(null)
         methodChannel = null
+        try {
+            ioExecutor.shutdown()
+        } catch (_: Throwable) {}
     }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:vision_assistant/services/auto_flashlight_controller.dart';
 import 'package:vision_assistant/services/bisaya_number_normalizer.dart';
 import 'package:vision_assistant/services/bisaya_speech_assembler.dart';
 import 'package:vision_assistant/services/currency_language_controller.dart';
@@ -279,6 +280,33 @@ void main() {
         BisayaSpeechAssembler.clipsForAssessment(conflict),
         anyOf(equals(['warn_conflict']), equals(['warn_overlap'])),
       );
+    });
+
+    test('AutoFlashlightPhrases and SpeechService use explicit flashlight clips, never confirm_bisaya', () async {
+      expect(AutoFlashlightPhrases.phraseFor(enabled: true, languageCode: 'ceb-PH'), 'Naka-on ang flashlight.');
+      expect(AutoFlashlightPhrases.phraseFor(enabled: false, languageCode: 'ceb-PH'), 'Naka-off ang flashlight.');
+      expect(AutoFlashlightPhrases.clipsFor(enabled: true, languageCode: 'ceb-PH'), ['flashlight_on']);
+      expect(AutoFlashlightPhrases.clipsFor(enabled: false, languageCode: 'ceb-PH'), ['flashlight_off']);
+      expect(AutoFlashlightPhrases.clipsFor(enabled: true, languageCode: 'en-IN'), isNull);
+
+      final fakeTts = _FakeFlutterTts();
+      final spokenBisaya = <String>[];
+      final svc = SpeechService(
+        tts: fakeTts,
+        bisayaInitFn: () async => {'status': 'initialized'},
+        bisayaSpeakFn: (text, rate) async {
+          spokenBisaya.add(text);
+          return 1;
+        },
+      );
+      await svc.initialize();
+      await svc.enqueueShortAnnouncement(
+        'Naka-on ang flashlight.',
+        language: 'ceb-PH',
+        bisayaClips: const ['flashlight_on'],
+      );
+      expect(spokenBisaya, ['Naka-on ang flashlight.']);
+      expect(fakeTts.spoken, isEmpty);
     });
   });
 }

@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.1.2 (2026-11-19)
+- **Faster, Smoother Foreground APK Downloads:** Throttled download progress callbacks to at most 1 update per 250 ms (maximum 4 updates per second) with a minimum progress delta of 0.5%, reducing foreground dialog UI rebuilds by over 98% and maintaining full wire download speed while visible.
+- **Background APK Checksum Verification:** Offloaded SHA-256 integrity calculation to a dedicated background `ioExecutor` in `AppUpdateChannel.kt`, eliminating the 1.5–3.0 second main-thread UI freeze upon download completion.
+- **Automatic Install Continuation:** Integrated `WidgetsBindingObserver` lifecycle resumption. When returning to Sanetra after granting Android's "Install unknown apps" permission in Settings, the application automatically launches the Android package installer without requiring the user to restart the update.
+- **Zero-Download Verified APK Reuse:** Persisted pending update install metadata (`PendingUpdateInstall`) in private cache, allowing the already downloaded and verified 421 MB APK to be reused immediately without downloading again.
+- **Stream Integrity & Cleanup:** Partial incomplete files are automatically deleted upon connection loss or socket read errors, preventing corrupted cache states.
+- **Automated Validation:** Full test suite verified (133/133 tests passing, 100% green); static analysis clean (0 issues). Physical validation on Nothing Phone (3a) Pro was pending at release time due to disconnected ADB.
+
 ## v2.1.0 (2026-11-16)
 - **Offline Bisaya (`ceb-PH`) Currency Speech:** Added Bisaya as the fourth selectable Currency Recognition language (`English`, `Kannada`, `Hindi`, `Bisaya`) with instant zero-synthesis-delay `AudioTrack` playback (`BisayaTtsChannel.kt`, `BisayaSpeechAssembler`, `BisayaNumberNormalizer`, and 43 normalized 16 kHz WAV clips totaling `1.52 MB`; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for Meta AI `facebook/mms-tts-ceb` `CC-BY-NC 4.0` attribution).
 - **Strict OCR Isolation & Pipeline Preservation:** OCR remains strictly `en-IN`, `kn-IN`, and `hi-IN`. Currency ONNX models (`Phase 4L + Phase 4N + N5 + Phase 4O.10`), safety thresholds, `en-IN`/`kn-IN`/`hi-IN` TTS, flashlight, and volume gestures remain unchanged.

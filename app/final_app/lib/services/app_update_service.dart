@@ -178,6 +178,210 @@ class UpdateDownloadResult {
   final bool installerCancelled;
 }
 
+enum UpdateProgressStage {
+  preparing,
+  downloading,
+  verifying,
+  downloadComplete,
+  waitingForPermission,
+  openingInstaller,
+  installerOpened,
+  failed,
+}
+
+class ThrottledProgressReporter {
+  ThrottledProgressReporter({
+    required this.onProgress,
+    this.minInterval = const Duration(milliseconds: 250),
+    this.minDelta = 0.005, // 0.5 percentage points
+    DateTime Function()? now,
+  }) : _now = now ?? DateTime.now;
+
+  final void Function(double progress) onProgress;
+  final Duration minInterval;
+  final double minDelta;
+  final DateTime Function() _now;
+
+  DateTime? _lastReportTime;
+  double _lastReportedProgress = -1.0;
+  int _lastReportedPercentage = -1;
+  bool _hasReportedInitial = false;
+
+  void reportInitial() {
+    if (!_hasReportedInitial) {
+      _hasReportedInitial = true;
+      _lastReportedProgress = 0.0;
+      _lastReportedPercentage = 0;
+      _lastReportTime = _now();
+      onProgress(0.0);
+    }
+  }
+
+  void report(double progress) {
+    if (!_hasReportedInitial) {
+      reportInitial();
+    }
+    if (progress < 0) {
+      final now = _now();
+      if (_lastReportedProgress != -1.0 ||
+          _lastReportTime == null ||
+          now.difference(_lastReportTime!) >= minInterval) {
+        _lastReportTime = now;
+        _lastReportedProgress = -1.0;
+        onProgress(-1.0);
+      }
+      return;
+    }
+
+    final clamped = progress.clamp(0.0, 1.0);
+    final percentage = (clamped * 100).floor();
+    final now = _now();
+
+    if (_lastReportTime == null) {
+      _lastReportTime = now;
+      _lastReportedProgress = clamped;
+      _lastReportedPercentage = percentage;
+      onProgress(clamped);
+      return;
+    }
+
+    final elapsed = now.difference(_lastReportTime!);
+    final delta = (clamped - _lastReportedProgress).abs();
+
+    if (elapsed >= minInterval && delta >= minDelta && percentage != _lastReportedPercentage) {
+      _lastReportTime = now;
+      _lastReportedProgress = clamped;
+      _lastReportedPercentage = percentage;
+      onProgress(clamped);
+    }
+  }
+
+  void reportFinal() {
+    if (!_hasReportedInitial) {
+      reportInitial();
+    }
+    if (_lastReportedProgress != 1.0) {
+      _lastReportedProgress = 1.0;
+      _lastReportedPercentage = 100;
+      _lastReportTime = _now();
+      onProgress(1.0);
+    }
+  }
+}
+
+class PendingUpdateInstall {
+  const PendingUpdateInstall({
+    required this.apkPath,
+    required this.apkAsset,
+    required this.version,
+    required this.versionCode,
+    required this.expectedPackageName,
+    required this.expectedSha256,
+    required this.verifiedFileSize,
+    required this.verifiedAt,
+    this.permissionRequired = false,
+    this.installerLaunched = false,
+  });
+
+  final String apkPath;
+  final String apkAsset;
+  final String version;
+  final int versionCode;
+  final String expectedPackageName;
+  final String expectedSha256;
+  final int verifiedFileSize;
+  final DateTime verifiedAt;
+  final bool permissionRequired;
+  final bool installerLaunched;
+
+  PendingUpdateInstall copyWith({
+    String? apkPath,
+    String? apkAsset,
+    String? version,
+    int? versionCode,
+    String? expectedPackageName,
+    String? expectedSha256,
+    int? verifiedFileSize,
+    DateTime? verifiedAt,
+    bool? permissionRequired,
+    bool? installerLaunched,
+  }) {
+    return PendingUpdateInstall(
+      apkPath: apkPath ?? this.apkPath,
+      apkAsset: apkAsset ?? this.apkAsset,
+      version: version ?? this.version,
+      versionCode: versionCode ?? this.versionCode,
+      expectedPackageName: expectedPackageName ?? this.expectedPackageName,
+      expectedSha256: expectedSha256 ?? this.expectedSha256,
+      verifiedFileSize: verifiedFileSize ?? this.verifiedFileSize,
+      verifiedAt: verifiedAt ?? this.verifiedAt,
+      permissionRequired: permissionRequired ?? this.permissionRequired,
+      installerLaunched: installerLaunched ?? this.installerLaunched,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'apkPath': apkPath,
+    'apkAsset': apkAsset,
+    'version': version,
+    'versionCode': versionCode,
+    'expectedPackageName': expectedPackageName,
+    'expectedSha256': expectedSha256,
+    'verifiedFileSize': verifiedFileSize,
+    'verifiedAt': verifiedAt.toIso8601String(),
+    'permissionRequired': permissionRequired,
+    'installerLaunched': installerLaunched,
+  };
+
+  static PendingUpdateInstall? fromJson(Map<String, dynamic> json) {
+    try {
+      final apkPath = (json['apkPath'] as String?)?.trim() ?? '';
+      final apkAsset = (json['apkAsset'] as String?)?.trim() ?? '';
+      final version = (json['version'] as String?)?.trim() ?? '';
+      final versionCode = json['versionCode'] as int?;
+      final expectedPackageName =
+          (json['expectedPackageName'] as String?)?.trim() ?? '';
+      final expectedSha256 =
+          (json['expectedSha256'] as String?)?.trim().toUpperCase() ?? '';
+      final verifiedFileSize = json['verifiedFileSize'] as int?;
+      final verifiedAtStr = json['verifiedAt'] as String?;
+      final permissionRequired = json['permissionRequired'] as bool? ?? false;
+      final installerLaunched = json['installerLaunched'] as bool? ?? false;
+
+      if (apkPath.isEmpty ||
+          apkAsset.isEmpty ||
+          version.isEmpty ||
+          versionCode == null ||
+          versionCode <= 0 ||
+          expectedPackageName.isEmpty ||
+          expectedSha256.isEmpty ||
+          verifiedFileSize == null ||
+          verifiedFileSize <= 0 ||
+          verifiedAtStr == null) {
+        return null;
+      }
+
+      final verifiedAt = DateTime.tryParse(verifiedAtStr);
+      if (verifiedAt == null) return null;
+
+      return PendingUpdateInstall(
+        apkPath: apkPath,
+        apkAsset: apkAsset,
+        version: version,
+        versionCode: versionCode,
+        expectedPackageName: expectedPackageName,
+        expectedSha256: expectedSha256,
+        verifiedFileSize: verifiedFileSize,
+        verifiedAt: verifiedAt,
+        permissionRequired: permissionRequired,
+        installerLaunched: installerLaunched,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
 typedef ManifestFetcher = Future<String> Function(Uri url, Duration timeout);
 typedef ApkInstaller = Future<Map<String, dynamic>> Function(String path, String expectedPackageName);
 typedef ApkDownloader = Future<void> Function(
@@ -205,6 +409,7 @@ class AppUpdateService {
     Future<Directory> Function()? getCacheDir,
     ApkInstaller? launchInstaller,
     Future<void> Function()? openInstallSettings,
+    Future<bool> Function()? canRequestPackageInstalls,
     DateTime Function()? now,
   }) : manifestUrl =
            manifestUrl ??
@@ -221,6 +426,8 @@ class AppUpdateService {
        _launchInstaller = launchInstaller ?? _defaultLaunchInstaller,
        _openInstallSettings =
            openInstallSettings ?? _defaultOpenInstallSettings,
+       _canRequestPackageInstalls =
+           canRequestPackageInstalls ?? _defaultCanRequestPackageInstalls,
        _now = now ?? DateTime.now;
 
   static const MethodChannel _channel = MethodChannel(
@@ -245,8 +452,11 @@ class AppUpdateService {
   final Future<Directory> Function() _getCacheDir;
   final ApkInstaller _launchInstaller;
   final Future<void> Function() _openInstallSettings;
+  final Future<bool> Function() _canRequestPackageInstalls;
   final DateTime Function() _now;
 
+  PendingUpdateInstall? _pendingInstall;
+  bool _isLaunchingInstaller = false;
   StreamSubscription<bool>? _connSub;
   Timer? _debounceTimer;
   bool _isChecking = false;
@@ -390,14 +600,215 @@ class AppUpdateService {
     );
   }
 
+  Future<bool> canRequestPackageInstalls() => _canRequestPackageInstalls();
+
+  Future<File> _getPendingInstallMetadataFile() async {
+    final cacheDir = await _getCacheDir();
+    return File('${cacheDir.path}/pending_install.json');
+  }
+
+  Future<PendingUpdateInstall?> getPendingInstall() async {
+    if (_pendingInstall != null) return _pendingInstall;
+    try {
+      final metaFile = await _getPendingInstallMetadataFile();
+      if (!await metaFile.exists()) return null;
+      final content = await metaFile.readAsString();
+      final decoded = jsonDecode(content);
+      if (decoded is! Map<String, dynamic>) return null;
+      _pendingInstall = PendingUpdateInstall.fromJson(decoded);
+      return _pendingInstall;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> savePendingInstall(PendingUpdateInstall pending) async {
+    _pendingInstall = pending;
+    try {
+      final metaFile = await _getPendingInstallMetadataFile();
+      if (!await metaFile.parent.exists()) {
+        await metaFile.parent.create(recursive: true);
+      }
+      await metaFile.writeAsString(jsonEncode(pending.toJson()), flush: true);
+    } catch (e) {
+      debugPrint('[APP-UPDATE] Failed to save pending_install.json: $e');
+    }
+  }
+
+  Future<void> clearPendingInstall() async {
+    _pendingInstall = null;
+    try {
+      final metaFile = await _getPendingInstallMetadataFile();
+      if (await metaFile.exists()) {
+        await metaFile.delete();
+      }
+    } catch (_) {}
+  }
+
+  Future<PendingUpdateInstall?> validateRestoredPendingInstall() async {
+    final pending = await getPendingInstall();
+    if (pending == null) return null;
+
+    try {
+      final installed = await _getInstalledAppInfo();
+      if (installed.versionCode >= pending.versionCode) {
+        await clearPendingInstall();
+        final apkFile = File(pending.apkPath);
+        if (await apkFile.exists()) {
+          try {
+            await apkFile.delete();
+          } catch (_) {}
+        }
+        return null;
+      }
+
+      final cacheDir = await _getCacheDir();
+      final apkFile = File(pending.apkPath);
+      if (!await apkFile.exists()) {
+        await clearPendingInstall();
+        return null;
+      }
+
+      final canonicalApk = apkFile.resolveSymbolicLinksSync();
+      final canonicalCache = cacheDir.resolveSymbolicLinksSync();
+      if (!canonicalApk.startsWith(canonicalCache)) {
+        await clearPendingInstall();
+        return null;
+      }
+
+      final fileSize = await apkFile.length();
+      if (fileSize != pending.verifiedFileSize ||
+          fileSize <= 0 ||
+          fileSize > maxApkBytes) {
+        await clearPendingInstall();
+        try {
+          await apkFile.delete();
+        } catch (_) {}
+        return null;
+      }
+
+      final actualSha = await _computeSha256(apkFile.path);
+      if (actualSha == null ||
+          actualSha.toUpperCase() != pending.expectedSha256.toUpperCase()) {
+        await clearPendingInstall();
+        try {
+          await apkFile.delete();
+        } catch (_) {}
+        return null;
+      }
+
+      return pending;
+    } catch (e) {
+      debugPrint('[APP-UPDATE] validateRestoredPendingInstall error: $e');
+      await clearPendingInstall();
+      return null;
+    }
+  }
+
+  Future<void> cleanupInstalledOrStaleUpdates(InstalledAppInfo installed) async {
+    try {
+      final pending = await getPendingInstall();
+      if (pending != null && installed.versionCode >= pending.versionCode) {
+        final apkFile = File(pending.apkPath);
+        if (await apkFile.exists()) {
+          try {
+            await apkFile.delete();
+          } catch (_) {}
+        }
+        await clearPendingInstall();
+      }
+    } catch (_) {}
+  }
+
+  Future<UpdateDownloadResult> resumePendingInstallIfPermitted({
+    void Function(UpdateProgressStage stage)? onStageChanged,
+  }) async {
+    if (_isLaunchingInstaller || _isDownloading) {
+      return const UpdateDownloadResult(
+        success: false,
+        error: 'Installation already launching or busy',
+      );
+    }
+    _isLaunchingInstaller = true;
+    try {
+      final pending = _pendingInstall ?? await validateRestoredPendingInstall();
+      if (pending == null) {
+        onStageChanged?.call(UpdateProgressStage.failed);
+        return const UpdateDownloadResult(
+          success: false,
+          error: 'No valid pending update found',
+        );
+      }
+
+      final apkFile = File(pending.apkPath);
+      if (!await apkFile.exists()) {
+        await clearPendingInstall();
+        onStageChanged?.call(UpdateProgressStage.failed);
+        return const UpdateDownloadResult(
+          success: false,
+          error: 'Pending APK file missing',
+        );
+      }
+
+      final permitted = await canRequestPackageInstalls();
+      if (!permitted) {
+        _pendingInstall = pending.copyWith(permissionRequired: true);
+        await savePendingInstall(_pendingInstall!);
+        onStageChanged?.call(UpdateProgressStage.waitingForPermission);
+        return UpdateDownloadResult(
+          success: false,
+          filePath: apkFile.path,
+          needsInstallPermission: true,
+          error: 'Install unknown apps permission required',
+        );
+      }
+
+      onStageChanged?.call(UpdateProgressStage.openingInstaller);
+      final installRes =
+          await _launchInstaller(apkFile.path, pending.expectedPackageName);
+      final started = installRes['started'] == true;
+      final needsPerm = installRes['needsInstallPermission'] == true;
+      final err = installRes['error'] as String?;
+
+      if (started) {
+        _pendingInstall = pending.copyWith(
+          installerLaunched: true,
+          permissionRequired: false,
+        );
+        await savePendingInstall(_pendingInstall!);
+        onStageChanged?.call(UpdateProgressStage.installerOpened);
+      } else if (needsPerm) {
+        _pendingInstall = pending.copyWith(permissionRequired: true);
+        await savePendingInstall(_pendingInstall!);
+        onStageChanged?.call(UpdateProgressStage.waitingForPermission);
+      } else {
+        onStageChanged?.call(UpdateProgressStage.failed);
+      }
+
+      return UpdateDownloadResult(
+        success: started,
+        filePath: apkFile.path,
+        needsInstallPermission: needsPerm,
+        error: started ? null : (err ?? 'Installation was cancelled or failed'),
+        installerCancelled: !started && !needsPerm && err == null,
+      );
+    } catch (e) {
+      onStageChanged?.call(UpdateProgressStage.failed);
+      return UpdateDownloadResult(success: false, error: e.toString());
+    } finally {
+      _isLaunchingInstaller = false;
+    }
+  }
+
   Future<UpdateDownloadResult> downloadAndInstall(
     UpdateManifest manifest, {
     void Function(double progress)? onProgress,
+    void Function(UpdateProgressStage stage)? onStageChanged,
   }) async {
-    if (_isDownloading) {
+    if (_isDownloading || _isLaunchingInstaller) {
       return const UpdateDownloadResult(
         success: false,
-        error: 'Download already in progress',
+        error: 'Download or install already in progress',
       );
     }
 
@@ -409,25 +820,74 @@ class AppUpdateService {
       );
     }
 
+    final expectedPackageName =
+        manifest.packageName ?? (await _getInstalledAppInfo()).packageName;
+    if (expectedPackageName != UpdateManifest.sanetraPackageName &&
+        expectedPackageName != (await _getInstalledAppInfo()).packageName) {
+      return const UpdateDownloadResult(
+        success: false,
+        error: 'Update manifest contains an unsupported target package ID',
+      );
+    }
+
+    final cacheDir = await _getCacheDir();
+    if (!await cacheDir.exists()) {
+      await cacheDir.create(recursive: true);
+    }
+    final destFile = File('${cacheDir.path}/${manifest.apkAsset}');
+
+    // 1. Check if an existing verified APK already exists for this manifest
+    final existingPending = _pendingInstall ?? await getPendingInstall();
+    bool alreadyVerified = false;
+    if (existingPending != null &&
+        existingPending.versionCode == manifest.versionCode &&
+        existingPending.expectedSha256.toUpperCase() ==
+            manifest.sha256.toUpperCase() &&
+        existingPending.apkPath == destFile.path &&
+        await destFile.exists() &&
+        await destFile.length() == existingPending.verifiedFileSize) {
+      if (_pendingInstall != null) {
+        alreadyVerified = true;
+      } else {
+        final recheckedSha = await _computeSha256(destFile.path);
+        if (recheckedSha != null &&
+            recheckedSha.toUpperCase() == manifest.sha256.toUpperCase()) {
+          alreadyVerified = true;
+          _pendingInstall = existingPending;
+        }
+      }
+    }
+
+    if (alreadyVerified) {
+      debugPrint('[APP-UPDATE] Existing verified APK reused without re-downloading.');
+      onStageChanged?.call(UpdateProgressStage.downloadComplete);
+      return resumePendingInstallIfPermitted(onStageChanged: onStageChanged);
+    }
+
+    // 2. Perform download
     _isDownloading = true;
     try {
-      final cacheDir = await _getCacheDir();
-      if (!await cacheDir.exists()) {
-        await cacheDir.create(recursive: true);
-      }
-      final destFile = File('${cacheDir.path}/${manifest.apkAsset}');
+      onStageChanged?.call(UpdateProgressStage.preparing);
       if (await destFile.exists()) {
         await destFile.delete();
       }
 
+      final throttler = onProgress != null
+          ? ThrottledProgressReporter(onProgress: onProgress)
+          : null;
+      throttler?.reportInitial();
+
+      onStageChanged?.call(UpdateProgressStage.downloading);
       await _downloadApk(
         Uri.parse(urlStr),
         destFile,
-        onProgress,
+        throttler != null ? (p) => throttler.report(p) : null,
         downloadTimeout,
       );
+      throttler?.reportFinal();
 
       if (!await destFile.exists()) {
+        onStageChanged?.call(UpdateProgressStage.failed);
         return const UpdateDownloadResult(
           success: false,
           error: 'Downloaded APK file missing',
@@ -436,52 +896,54 @@ class AppUpdateService {
       final fileSize = await destFile.length();
       if (fileSize <= 0 || fileSize > maxApkBytes) {
         await destFile.delete();
+        onStageChanged?.call(UpdateProgressStage.failed);
         return const UpdateDownloadResult(
           success: false,
           error: 'Downloaded APK size invalid or exceeds limit',
         );
       }
 
+      onStageChanged?.call(UpdateProgressStage.verifying);
       final actualSha = await _computeSha256(destFile.path);
       if (actualSha == null ||
           actualSha.toUpperCase() != manifest.sha256.toUpperCase()) {
         await destFile.delete();
+        onStageChanged?.call(UpdateProgressStage.failed);
         return const UpdateDownloadResult(
           success: false,
           error: 'APK checksum verification failed',
         );
       }
 
-      // The manifest package ID identifies the APK to install. It may differ from
-      // the running v1 package during the one-time v1 -> v2 migration.
-      final expectedPackageName =
-          manifest.packageName ?? (await _getInstalledAppInfo()).packageName;
-      if (expectedPackageName != UpdateManifest.sanetraPackageName &&
-          expectedPackageName != (await _getInstalledAppInfo()).packageName) {
-        await destFile.delete();
-        return const UpdateDownloadResult(
-          success: false,
-          error: 'Update manifest contains an unsupported target package ID',
-        );
-      }
-      final installRes = await _launchInstaller(destFile.path, expectedPackageName);
-      final started = installRes['started'] == true;
-      final needsPerm = installRes['needsInstallPermission'] == true;
-      final err = installRes['error'] as String?;
-
-      return UpdateDownloadResult(
-        success: started,
-        filePath: destFile.path,
-        needsInstallPermission: needsPerm,
-        error: started ? null : (err ?? 'Installation was cancelled or failed'),
-        installerCancelled: !started && !needsPerm && err == null,
+      onStageChanged?.call(UpdateProgressStage.downloadComplete);
+      final newPending = PendingUpdateInstall(
+        apkPath: destFile.path,
+        apkAsset: manifest.apkAsset,
+        version: manifest.version,
+        versionCode: manifest.versionCode,
+        expectedPackageName: expectedPackageName,
+        expectedSha256: manifest.sha256.toUpperCase(),
+        verifiedFileSize: fileSize,
+        verifiedAt: _now(),
+        permissionRequired: false,
+        installerLaunched: false,
       );
+      await savePendingInstall(newPending);
     } catch (e) {
-      debugPrint('[APP-UPDATE] Download/install error: $e');
+      debugPrint('[APP-UPDATE] Download error: $e');
+      if (await destFile.exists()) {
+        try {
+          await destFile.delete();
+        } catch (_) {}
+      }
+      onStageChanged?.call(UpdateProgressStage.failed);
       return UpdateDownloadResult(success: false, error: e.toString());
     } finally {
       _isDownloading = false;
     }
+
+    // 3. Launch installation
+    return resumePendingInstallIfPermitted(onStageChanged: onStageChanged);
   }
 
   Future<void> openUnknownSourcesSettings() => _openInstallSettings();
@@ -510,20 +972,29 @@ class AppUpdateService {
   }
 
   static Future<InstalledAppInfo> _defaultGetInstalledAppInfo() async {
-    final map = await _channel.invokeMapMethod<String, dynamic>(
-      'getInstalledAppInfo',
-    );
-    final abis = (map?['supportedAbis'] as List?)
-            ?.map((e) => e.toString())
-            .toList() ??
-        const ['arm64-v8a'];
-    return InstalledAppInfo(
-      packageName:
-          map?['packageName']?.toString() ?? 'com.sanetra.assistivevision',
-      versionName: map?['versionName']?.toString() ?? '2.0.0',
-      versionCode: (map?['versionCode'] as num?)?.toInt() ?? 2,
-      supportedAbis: abis,
-    );
+    try {
+      final map = await _channel.invokeMapMethod<String, dynamic>(
+        'getInstalledAppInfo',
+      );
+      final abis = (map?['supportedAbis'] as List?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          const ['arm64-v8a'];
+      return InstalledAppInfo(
+        packageName:
+            map?['packageName']?.toString() ?? 'com.sanetra.assistivevision',
+        versionName: map?['versionName']?.toString() ?? '2.0.0',
+        versionCode: (map?['versionCode'] as num?)?.toInt() ?? 2,
+        supportedAbis: abis,
+      );
+    } catch (_) {
+      return const InstalledAppInfo(
+        packageName: 'com.sanetra.assistivevision',
+        versionName: '2.0.0',
+        versionCode: 2,
+        supportedAbis: ['arm64-v8a'],
+      );
+    }
   }
 
   static Future<String> _defaultFetchManifest(Uri url, Duration timeout) async {
@@ -561,28 +1032,59 @@ class AppUpdateService {
         await for (final chunk in resp.timeout(timeout)) {
           sink.add(chunk);
           received += chunk.length;
-          if (total > 0 && onProgress != null) {
-            onProgress((received / total).clamp(0.0, 1.0));
+          if (onProgress != null) {
+            if (total > 0) {
+              onProgress((received / total).clamp(0.0, 1.0));
+            } else {
+              onProgress(-1.0);
+            }
           }
         }
         await sink.flush();
+      } catch (e) {
+        try {
+          await sink.close();
+        } catch (_) {}
+        if (await destination.exists()) {
+          try {
+            await destination.delete();
+          } catch (_) {}
+        }
+        rethrow;
       } finally {
-        await sink.close();
+        try {
+          await sink.close();
+        } catch (_) {}
       }
     } finally {
       client.close(force: true);
     }
   }
 
+  static Future<bool> _defaultCanRequestPackageInstalls() async {
+    try {
+      return await _channel.invokeMethod<bool>('canRequestPackageInstalls') ??
+          true;
+    } catch (_) {
+      return true;
+    }
+  }
+
   static Future<String?> _defaultComputeSha256(String path) async {
-    return _channel.invokeMethod<String>('computeFileSha256', {'path': path});
+    try {
+      return await _channel.invokeMethod<String>('computeFileSha256', {'path': path});
+    } catch (_) {
+      return null;
+    }
   }
 
   static Future<Directory> _defaultGetCacheDir() async {
-    final path = await _channel.invokeMethod<String>('getUpdateCacheDir');
-    if (path != null && path.isNotEmpty) {
-      return Directory(path);
-    }
+    try {
+      final path = await _channel.invokeMethod<String>('getUpdateCacheDir');
+      if (path != null && path.isNotEmpty) {
+        return Directory(path);
+      }
+    } catch (_) {}
     return Directory('${Directory.systemTemp.path}/sanetra_updates');
   }
 
@@ -590,14 +1092,20 @@ class AppUpdateService {
     String path,
     String expectedPackageName,
   ) async {
-    final res = await _channel.invokeMapMethod<String, dynamic>('installApk', {
-      'path': path,
-      'expectedPackageName': expectedPackageName,
-    });
-    return res ?? <String, dynamic>{'started': false};
+    try {
+      final res = await _channel.invokeMapMethod<String, dynamic>('installApk', {
+        'path': path,
+        'expectedPackageName': expectedPackageName,
+      });
+      return res ?? <String, dynamic>{'started': false};
+    } catch (_) {
+      return <String, dynamic>{'started': false};
+    }
   }
 
   static Future<void> _defaultOpenInstallSettings() async {
-    await _channel.invokeMethod<void>('openUnknownSourcesSettings');
+    try {
+      await _channel.invokeMethod<void>('openUnknownSourcesSettings');
+    } catch (_) {}
   }
 }

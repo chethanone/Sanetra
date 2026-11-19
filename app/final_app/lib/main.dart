@@ -11,6 +11,7 @@ import 'package:vision_assistant/services/auto_flashlight_controller.dart';
 import 'package:vision_assistant/services/banknote_tracker.dart';
 import 'package:vision_assistant/services/currency_language_controller.dart';
 import 'package:vision_assistant/services/currency_model_service.dart';
+import 'package:vision_assistant/services/currency_region.dart';
 import 'package:vision_assistant/services/currency_safety_evaluator.dart';
 import 'package:vision_assistant/services/currency_speech_formatter.dart';
 import 'package:vision_assistant/services/mode_transition_controller.dart';
@@ -119,6 +120,8 @@ class _CameraScreenState extends State<CameraScreen>
   bool _isTorchOn = false;
   bool _isMuted = false;
   String _currencyLanguage = 'en-IN';
+  final CurrencyRegionController _currencyRegionController =
+      CurrencyRegionController();
   bool _showLanguagePopup = false;
   bool _isCurrencyMode =
       true; // Mode toggle: Currency (true) vs Document Text OCR (false)
@@ -201,6 +204,14 @@ class _CameraScreenState extends State<CameraScreen>
         if (_isMuted || _showLanguagePopup) return;
         await _speechService.enqueueShortAnnouncement(text, language: language);
       },
+      onAnnounceWithClips: (text, {required language, bisayaClips}) async {
+        if (_isMuted || _showLanguagePopup) return;
+        await _speechService.enqueueShortAnnouncement(
+          text,
+          language: language,
+          bisayaClips: bisayaClips,
+        );
+      },
       getSpeechLanguage: () => _currencyLanguage,
       onTorchStateChanged: (enabled) {
         if (mounted) {
@@ -232,6 +243,21 @@ class _CameraScreenState extends State<CameraScreen>
         !_isCurrencyCapturing &&
         !_showLanguagePopup &&
         !_isUpdateDialogVisible;
+  }
+
+  Future<void> _handleResumedUpdateCheck() async {
+    if (_isUpdateDialogVisible) return;
+    try {
+      final pending = await _appUpdateService.validateRestoredPendingInstall();
+      if (pending != null && mounted) {
+        final permitted = await _appUpdateService.canRequestPackageInstalls();
+        if (permitted) {
+          await _appUpdateService.resumePendingInstallIfPermitted();
+          return;
+        }
+      }
+    } catch (_) {}
+    await _checkForAppUpdate();
   }
 
   Future<void> _checkForAppUpdate() async {
@@ -290,7 +316,10 @@ class _CameraScreenState extends State<CameraScreen>
         final isValid = CurrencyLanguageController.isValidCode(saved);
         if (isValid && mounted) {
           _languageController.setSelectedCode(saved);
-          setState(() => _currencyLanguage = saved);
+          setState(() {
+            _currencyLanguage = saved;
+            _syncCurrencyRegionForLanguage(saved);
+          });
           debugPrint('[PREF] Loaded currency language: $saved');
         }
       }
@@ -626,6 +655,15 @@ class _CameraScreenState extends State<CameraScreen>
 
         _isProcessingFrame = true;
         final frameEpoch = _currencyInferenceEpoch;
+        final frameRegion = _currencyRegionController.region;
+        final frameRegionEpoch = _currencyRegionController.regionEpoch;
+
+        // Strict cross-currency isolation: never run INR ONNX detectors when
+        // Philippine Peso (PHP / Bisaya) region is active.
+        if (frameRegion == CurrencyRegion.php) {
+          _isProcessingFrame = false;
+          return;
+        }
 
         try {
           final sensorOrientation = controller.description.sensorOrientation;
@@ -638,13 +676,21 @@ class _CameraScreenState extends State<CameraScreen>
               !_isLiveStreamActive ||
               !_isCurrencyMode ||
               _showLanguagePopup ||
-              frameEpoch != _currencyInferenceEpoch) {
+              frameEpoch != _currencyInferenceEpoch ||
+              !_currencyRegionController.isResultCurrent(
+                capturedEpoch: frameRegionEpoch,
+                capturedRegion: frameRegion,
+              )) {
             return;
           }
 
-          // Apply Currency Temporal Tracker & Candidate Safety Screening
-          final trackerResult = _currencyTracker.updateWithSafety(
+          // Strict region allowlist before tracking & safety screening
+          final regionFilteredDetections = filterDetectionsForRegion(
             result.detections,
+            frameRegion,
+          );
+          final trackerResult = _currencyTracker.updateWithSafety(
+            regionFilteredDetections,
             imageWidth: result.imageWidth,
             imageHeight: result.imageHeight,
           );
@@ -1171,10 +1217,10 @@ class _CameraScreenState extends State<CameraScreen>
     );
     if (!_isMuted) {
       unawaited(
-        _speechService.announceSelectorLanguage(
+        _speechService.speakText(
           'Language selector',
           language: 'en-IN',
-          generationId: _languageController.announcementGenerationId,
+          interrupt: true,
         ),
       );
     }
@@ -1207,13 +1253,31 @@ class _CameraScreenState extends State<CameraScreen>
     }
   }
 
+  void _syncCurrencyRegionForLanguage(String code) {
+    final changed = _currencyRegionController.updateForLanguage(code);
+    if (changed) {
+      _currencyInferenceEpoch++;
+      _currencyTracker.reset();
+      _currentDetections = const [];
+      _currentSafetyAssessment = null;
+      _showCaptureResult = false;
+      debugPrint(
+        '[CURRENCY-REGION] Switched to ${_currencyRegionController.region.name.toUpperCase()} '
+        '(symbol=${_currencyRegionController.symbol}, regionEpoch=${_currencyRegionController.regionEpoch})',
+      );
+    }
+  }
+
   void _navigateLanguageUp({int keyAgeMs = 0}) {
     final sw = Stopwatch()..start();
     final selected = _languageController.navigateUp(
       isMuted: _isMuted,
       keyAgeMs: keyAgeMs,
     );
-    setState(() => _currencyLanguage = selected.code);
+    setState(() {
+      _currencyLanguage = selected.code;
+      _syncCurrencyRegionForLanguage(selected.code);
+    });
     sw.stop();
     HapticFeedback.selectionClick();
     _resetLanguagePopupTimer();
@@ -1228,7 +1292,10 @@ class _CameraScreenState extends State<CameraScreen>
       isMuted: _isMuted,
       keyAgeMs: keyAgeMs,
     );
-    setState(() => _currencyLanguage = selected.code);
+    setState(() {
+      _currencyLanguage = selected.code;
+      _syncCurrencyRegionForLanguage(selected.code);
+    });
     sw.stop();
     HapticFeedback.selectionClick();
     _resetLanguagePopupTimer();
@@ -1317,7 +1384,7 @@ class _CameraScreenState extends State<CameraScreen>
       });
     } else if (state == AppLifecycleState.resumed) {
       _initializeCamera();
-      unawaited(_checkForAppUpdate());
+      unawaited(_handleResumedUpdateCheck());
     }
   }
 
@@ -1999,7 +2066,7 @@ class _CameraScreenState extends State<CameraScreen>
                 ),
                 child: Text(
                   isConfirmed && confirmedTotal != null
-                      ? '₹$confirmedTotal'
+                      ? '${_currencyRegionController.symbol}$confirmedTotal'
                       : 'CHECK',
                   style: const TextStyle(
                     color: Colors.white,
@@ -2145,12 +2212,12 @@ class _CameraScreenState extends State<CameraScreen>
                           ),
                           Text(
                             !_currencyModelService.isCandidateMode
-                                ? 'TOTAL: ₹${result.totalValue}'
+                                ? 'TOTAL: ${_currencyRegionController.symbol}${result.totalValue}'
                                 : (isConfirmed &&
                                           (assessment?.confirmedTotalRupees ??
                                                   result.totalValue) >
                                               0
-                                      ? 'CONFIRMED: ₹${assessment?.confirmedTotalRupees ?? result.totalValue}'
+                                      ? 'CONFIRMED: ${_currencyRegionController.symbol}${assessment?.confirmedTotalRupees ?? result.totalValue}'
                                       : 'UNCONFIRMED — SPREAD NOTES'),
                             style: TextStyle(
                               color: isConfirmed

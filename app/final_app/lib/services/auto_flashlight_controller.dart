@@ -42,6 +42,8 @@ class AutoFlashlightPhrases {
           return 'ಫ್ಲ್ಯಾಶ್ಲೈಟ್ ಆನ್ ಆಗಿದೆ.';
         case 'hi-IN':
           return 'फ्लैशलाइट चालू है।';
+        case 'ceb-PH':
+          return 'Naka-on ang flashlight.';
         default:
           return 'Flashlight on.';
       }
@@ -51,16 +53,34 @@ class AutoFlashlightPhrases {
           return 'ಫ್ಲ್ಯಾಶ್ಲೈಟ್ ಆಫ್ ಆಗಿದೆ.';
         case 'hi-IN':
           return 'फ्लैशलाइट बंद है।';
+        case 'ceb-PH':
+          return 'Naka-off ang flashlight.';
         default:
           return 'Flashlight off.';
       }
     }
+  }
+
+  /// Explicit Bisaya clip IDs for flashlight ON/OFF so Bisaya announcements
+  /// never fall back to `confirm_bisaya`.
+  static List<String>? clipsFor({
+    required bool enabled,
+    required String languageCode,
+  }) {
+    if (languageCode != 'ceb-PH') return null;
+    return [enabled ? 'flashlight_on' : 'flashlight_off'];
   }
 }
 
 typedef TorchSetCallback = Future<bool> Function(bool enabled);
 typedef TorchAnnounceCallback =
     Future<void> Function(String text, {required String language});
+typedef TorchAnnounceWithClipsCallback =
+    Future<void> Function(
+      String text, {
+      required String language,
+      List<String>? bisayaClips,
+    });
 
 /// Shared automatic ambient-light flashlight controller for Currency and OCR modes.
 class AutoFlashlightController {
@@ -68,6 +88,7 @@ class AutoFlashlightController {
     this.config = const AutoFlashlightConfig(),
     required this.onSetTorch,
     required this.onAnnounce,
+    this.onAnnounceWithClips,
     required this.getSpeechLanguage,
     this.onTorchStateChanged,
     Stream<double>? ambientLightStream,
@@ -142,6 +163,7 @@ class AutoFlashlightController {
   final AutoFlashlightConfig config;
   final TorchSetCallback onSetTorch;
   final TorchAnnounceCallback onAnnounce;
+  final TorchAnnounceWithClipsCallback? onAnnounceWithClips;
   final String Function() getSpeechLanguage;
   final void Function(bool enabled)? onTorchStateChanged;
   final Stream<double> _ambientLightStream;
@@ -433,7 +455,19 @@ class AutoFlashlightController {
           enabled: targetEnabled,
           languageCode: lang,
         );
-        await onAnnounce(phrase, language: lang);
+        final clips = AutoFlashlightPhrases.clipsFor(
+          enabled: targetEnabled,
+          languageCode: lang,
+        );
+        if (onAnnounceWithClips != null) {
+          await onAnnounceWithClips!(
+            phrase,
+            language: lang,
+            bisayaClips: clips,
+          );
+        } else {
+          await onAnnounce(phrase, language: lang);
+        }
       }
     } catch (e) {
       _lastFailureAt = _now();
