@@ -102,21 +102,36 @@ android {
 
     signingConfigs {
         if (keystorePropertiesFile.exists()) {
-            create("release") {
-                keyAlias = keystoreProperties.getProperty("keyAlias")
-                keyPassword = keystoreProperties.getProperty("keyPassword")
-                storeFile = file(keystoreProperties.getProperty("storeFile"))
-                storePassword = keystoreProperties.getProperty("storePassword")
+            val keyAliasVal = keystoreProperties.getProperty("keyAlias")
+            val keyPassVal = keystoreProperties.getProperty("keyPassword")
+            val storeFileVal = keystoreProperties.getProperty("storeFile")
+            val storePassVal = keystoreProperties.getProperty("storePassword")
+            if (!keyAliasVal.isNullOrBlank() && !storeFileVal.isNullOrBlank()) {
+                create("release") {
+                    keyAlias = keyAliasVal
+                    keyPassword = keyPassVal
+                    storeFile = file(storeFileVal)
+                    storePassword = storePassVal
+                }
             }
         }
     }
 
     buildTypes {
         release {
-            signingConfig = if (keystorePropertiesFile.exists()) {
-                signingConfigs.getByName("release")
+            val releaseSigningConfig = signingConfigs.findByName("release")
+            if (releaseSigningConfig != null && releaseSigningConfig.storeFile?.exists() == true) {
+                signingConfig = releaseSigningConfig
             } else {
-                signingConfigs.getByName("debug")
+                val isReleaseBuild = gradle.startParameter.taskNames.any {
+                    it.contains("Release", ignoreCase = true)
+                }
+                if (isReleaseBuild) {
+                    throw GradleException(
+                        "SECURITY VIOLATION: Production release build requires verified permanent release signing configuration in key.properties. Failing closed to prevent unsigned or debug-signed production artifacts."
+                    )
+                }
+                signingConfig = signingConfigs.getByName("debug")
             }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

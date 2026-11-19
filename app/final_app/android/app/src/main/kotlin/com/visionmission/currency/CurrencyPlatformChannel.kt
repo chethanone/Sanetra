@@ -290,8 +290,9 @@ class CurrencyPlatformChannel(
         val iouThresh = (call.argument<Double>("iouThreshold") ?: 0.45).toFloat()
 
         backgroundExecutor.execute {
+            var bitmap: Bitmap? = null
             try {
-                val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+                bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
                 if (bitmap == null) {
                     mainHandler.post {
                         result.error("DECODE_ERROR", "Failed to decode image bytes into Bitmap", null)
@@ -320,6 +321,10 @@ class CurrencyPlatformChannel(
                         "Error executing snapshot inference: ${e.message}",
                         e.stackTraceToString()
                     )
+                }
+            } finally {
+                if (bitmap != null && !bitmap.isRecycled) {
+                    bitmap.recycle()
                 }
             }
         }
@@ -362,9 +367,26 @@ class CurrencyPlatformChannel(
             return
         }
 
+        val minExpectedYSize = (height - 1) * yRowStride + width
+        val uvHeight = height / 2
+        val uvWidth = width / 2
+        val minExpectedUvSize = if (uvHeight > 0 && uvWidth > 0) (uvHeight - 1) * uvRowStride + (uvWidth - 1) * uvPixelStride + 1 else 0
+
+        if (yBytes.size < minExpectedYSize ||
+            uBytes.size < minExpectedUvSize ||
+            vBytes.size < minExpectedUvSize ||
+            yRowStride < width ||
+            uvRowStride < uvWidth ||
+            uvPixelStride < 1
+        ) {
+            result.error("INVALID_FRAME", "Camera frame buffer strides or plane sizes invalid", null)
+            return
+        }
+
         backgroundExecutor.execute {
+            var bitmap: Bitmap? = null
             try {
-                val bitmap = yuv420ToBitmap(
+                bitmap = yuv420ToBitmap(
                     yBytes = yBytes,
                     uBytes = uBytes,
                     vBytes = vBytes,
@@ -434,6 +456,10 @@ class CurrencyPlatformChannel(
                         "Error during camera frame inference: ${e.message}",
                         e.stackTraceToString()
                     )
+                }
+            } finally {
+                if (bitmap != null && !bitmap.isRecycled) {
+                    bitmap.recycle()
                 }
             }
         }

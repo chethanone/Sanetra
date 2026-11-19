@@ -146,6 +146,7 @@ class CurrencyDetector(
         orientationDegrees: Int = 0,
         dumpDiagnosticDir: java.io.File? = null
     ): PreprocessOutput {
+        val t0 = System.nanoTime()
         // Step 1: Normalize Orientation if rotated by camera sensor
         val orientedBitmap: Bitmap = if (orientationDegrees % 360 != 0) {
             val matrix = Matrix().apply { postRotate(orientationDegrees.toFloat()) }
@@ -153,10 +154,12 @@ class CurrencyDetector(
         } else {
             bitmap
         }
+        val orientationTimeMs = (System.nanoTime() - t0) / 1_000_000.0
 
         val origW = orientedBitmap.width
         val origH = orientedBitmap.height
 
+        val t1 = System.nanoTime()
         // Step 2: Calculate letterbox gain and padding for 640x640
         val gain = min(INPUT_SIZE.toFloat() / origW, INPUT_SIZE.toFloat() / origH)
         val newW = Math.round(origW * gain)
@@ -170,34 +173,29 @@ class CurrencyDetector(
         val canvas = Canvas(letterboxedBitmap)
         canvas.drawColor(Color.rgb(114, 114, 114))
         canvas.drawBitmap(scaledBitmap, padW, padH, Paint(Paint.FILTER_BITMAP_FLAG))
+        val scaleAndLetterboxTimeMs = (System.nanoTime() - t1) / 1_000_000.0
 
+        val t2 = System.nanoTime()
         // Step 4: Extract pixels and fill direct FloatBuffer in [1, 3, 640, 640] CHW layout normalized to [0.0f, 1.0f]
-        val pixels = IntArray(INPUT_SIZE * INPUT_SIZE)
+        val planeSize = INPUT_SIZE * INPUT_SIZE
+        val pixels = IntArray(planeSize)
         letterboxedBitmap.getPixels(pixels, 0, INPUT_SIZE, 0, 0, INPUT_SIZE, INPUT_SIZE)
 
-        val rawByteBuffer = ByteBuffer.allocateDirect(1 * 3 * INPUT_SIZE * INPUT_SIZE * 4)
+        val rawByteBuffer = ByteBuffer.allocateDirect(1 * 3 * planeSize * 4)
             .order(ByteOrder.nativeOrder())
         val floatBuffer = rawByteBuffer.asFloatBuffer()
 
-        val rOffset = 0
-        val gOffset = INPUT_SIZE * INPUT_SIZE
-        val bOffset = 2 * INPUT_SIZE * INPUT_SIZE
-
-        val rArray = FloatArray(INPUT_SIZE * INPUT_SIZE)
-        val gArray = FloatArray(INPUT_SIZE * INPUT_SIZE)
-        val bArray = FloatArray(INPUT_SIZE * INPUT_SIZE)
-
-        for (i in pixels.indices) {
+        // Zero-intermediate-array direct buffer population: avoids allocating three 1.6MB FloatArrays per frame
+        val gOffset = planeSize
+        val bOffset = 2 * planeSize
+        for (i in 0 until planeSize) {
             val pixel = pixels[i]
-            rArray[i] = ((pixel shr 16) and 0xFF) / 255.0f
-            gArray[i] = ((pixel shr 8) and 0xFF) / 255.0f
-            bArray[i] = (pixel and 0xFF) / 255.0f
+            floatBuffer.put(i, ((pixel shr 16) and 0xFF) / 255.0f)
+            floatBuffer.put(gOffset + i, ((pixel shr 8) and 0xFF) / 255.0f)
+            floatBuffer.put(bOffset + i, (pixel and 0xFF) / 255.0f)
         }
-
-        floatBuffer.put(rArray)
-        floatBuffer.put(gArray)
-        floatBuffer.put(bArray)
-        floatBuffer.rewind()
+        floatBuffer.position(0)
+        val tensorPrepTimeMs = (System.nanoTime() - t2) / 1_000_000.0
 
         if (isCandidateMode && dumpDiagnosticDir != null) {
             dumpDiagnosticDir.mkdirs()
@@ -214,6 +212,14 @@ class CurrencyDetector(
             java.io.File(dumpDiagnosticDir, "stage_c_tensor_1x3x640x640_nchw.bin").writeBytes(bytesOut)
         }
 
+        // Clean up intermediate letterboxing bitmaps immediately
+        if (scaledBitmap !== orientedBitmap && !scaledBitmap.isRecycled) {
+            scaledBitmap.recycle()
+        }
+        if (!letterboxedBitmap.isRecycled) {
+            letterboxedBitmap.recycle()
+        }
+
         return PreprocessOutput(
             tensorBuffer = floatBuffer,
             gain = gain,
@@ -221,7 +227,10 @@ class CurrencyDetector(
             padH = padH,
             origWidth = origW,
             origHeight = origH,
-            orientedBitmap = orientedBitmap
+            orientedBitmap = orientedBitmap,
+            orientationTimeMs = orientationTimeMs,
+            scaleAndLetterboxTimeMs = scaleAndLetterboxTimeMs,
+            tensorPrepTimeMs = tensorPrepTimeMs
         )
     }
 
@@ -235,41 +244,46 @@ class CurrencyDetector(
         val prep = preprocess(bitmap, orientationDegrees)
         val prepTimeMs = (System.nanoTime() - t0) / 1_000_000.0
 
-        val tensor = OnnxTensor.createTensor(
-            env,
-            prep.tensorBuffer,
-            longArrayOf(1, 3, INPUT_SIZE.toLong(), INPUT_SIZE.toLong())
-        )
+        var tensor: OnnxTensor? = null
+        var results: OrtSession.Result? = null
+        try {
+            tensor = OnnxTensor.createTensor(
+                env,
+                prep.tensorBuffer,
+                longArrayOf(1, 3, INPUT_SIZE.toLong(), INPUT_SIZE.toLong())
+            )
 
-        val t1 = System.nanoTime()
-        val results = coinSession.run(mapOf(coinInputName to tensor))
-        val inferTimeMs = (System.nanoTime() - t1) / 1_000_000.0
+            val t1 = System.nanoTime()
+            results = coinSession.run(mapOf(coinInputName to tensor))
+            val inferTimeMs = (System.nanoTime() - t1) / 1_000_000.0
 
-        @Suppress("UNCHECKED_CAST")
-        val rawOutput = results[0].value as Array<Array<FloatArray>> // [1, 8, 8400]
+            @Suppress("UNCHECKED_CAST")
+            val rawOutput = results[0].value as Array<Array<FloatArray>> // [1, 8, 8400]
 
-        val t2 = System.nanoTime()
-        val detections = decodeAndNmsCoins(
-            rawOutput = rawOutput[0],
-            numClasses = COIN_CLASSES.size,
-            classNames = COIN_CLASSES,
-            prep = prep,
-            confThreshold = confThreshold,
-            iouThreshold = iouThreshold
-        )
-        val decodeTimeMs = (System.nanoTime() - t2) / 1_000_000.0
+            val t2 = System.nanoTime()
+            val detections = decodeAndNmsCoins(
+                rawOutput = rawOutput[0],
+                numClasses = COIN_CLASSES.size,
+                classNames = COIN_CLASSES,
+                prep = prep,
+                confThreshold = confThreshold,
+                iouThreshold = iouThreshold
+            )
+            val decodeTimeMs = (System.nanoTime() - t2) / 1_000_000.0
 
-        results.close()
-        tensor.close()
-
-        return DetectionResponse(
-            model = "indian_coin_yolov8n",
-            preprocessTimeMs = prepTimeMs,
-            inferenceTimeMs = inferTimeMs,
-            decodeTimeMs = decodeTimeMs,
-            totalTimeMs = prepTimeMs + inferTimeMs + decodeTimeMs,
-            detections = detections
-        )
+            return DetectionResponse(
+                model = "indian_coin_yolov8n",
+                preprocessTimeMs = prepTimeMs,
+                inferenceTimeMs = inferTimeMs,
+                decodeTimeMs = decodeTimeMs,
+                totalTimeMs = prepTimeMs + inferTimeMs + decodeTimeMs,
+                detections = detections
+            )
+        } finally {
+            results?.close()
+            tensor?.close()
+            prep.recycleBitmaps(sourceBitmap = bitmap)
+        }
     }
 
     fun detectBanknotes(
@@ -282,41 +296,46 @@ class CurrencyDetector(
         val prep = preprocess(bitmap, orientationDegrees)
         val prepTimeMs = (System.nanoTime() - t0) / 1_000_000.0
 
-        val tensor = OnnxTensor.createTensor(
-            env,
-            prep.tensorBuffer,
-            longArrayOf(1, 3, INPUT_SIZE.toLong(), INPUT_SIZE.toLong())
-        )
+        var tensor: OnnxTensor? = null
+        var results: OrtSession.Result? = null
+        try {
+            tensor = OnnxTensor.createTensor(
+                env,
+                prep.tensorBuffer,
+                longArrayOf(1, 3, INPUT_SIZE.toLong(), INPUT_SIZE.toLong())
+            )
 
-        val t1 = System.nanoTime()
-        val results = banknoteSession.run(mapOf(banknoteInputName to tensor))
-        val inferTimeMs = (System.nanoTime() - t1) / 1_000_000.0
+            val t1 = System.nanoTime()
+            results = banknoteSession.run(mapOf(banknoteInputName to tensor))
+            val inferTimeMs = (System.nanoTime() - t1) / 1_000_000.0
 
-        @Suppress("UNCHECKED_CAST")
-        val rawOutput = results[0].value as Array<Array<FloatArray>> // [1, 10, 8400]
+            @Suppress("UNCHECKED_CAST")
+            val rawOutput = results[0].value as Array<Array<FloatArray>> // [1, 10, 8400]
 
-        val t2 = System.nanoTime()
-        val detections = decodeAndNms(
-            rawOutput = rawOutput[0],
-            numClasses = BANKNOTE_CLASSES.size,
-            classNames = BANKNOTE_CLASSES,
-            prep = prep,
-            confThreshold = confThreshold,
-            iouThreshold = iouThreshold
-        )
-        val decodeTimeMs = (System.nanoTime() - t2) / 1_000_000.0
+            val t2 = System.nanoTime()
+            val detections = decodeAndNms(
+                rawOutput = rawOutput[0],
+                numClasses = BANKNOTE_CLASSES.size,
+                classNames = BANKNOTE_CLASSES,
+                prep = prep,
+                confThreshold = confThreshold,
+                iouThreshold = iouThreshold
+            )
+            val decodeTimeMs = (System.nanoTime() - t2) / 1_000_000.0
 
-        results.close()
-        tensor.close()
-
-        return DetectionResponse(
-            model = "indian_banknote_yolov8n",
-            preprocessTimeMs = prepTimeMs,
-            inferenceTimeMs = inferTimeMs,
-            decodeTimeMs = decodeTimeMs,
-            totalTimeMs = prepTimeMs + inferTimeMs + decodeTimeMs,
-            detections = detections
-        )
+            return DetectionResponse(
+                model = "indian_banknote_yolov8n",
+                preprocessTimeMs = prepTimeMs,
+                inferenceTimeMs = inferTimeMs,
+                decodeTimeMs = decodeTimeMs,
+                totalTimeMs = prepTimeMs + inferTimeMs + decodeTimeMs,
+                detections = detections
+            )
+        } finally {
+            results?.close()
+            tensor?.close()
+            prep.recycleBitmaps(sourceBitmap = bitmap)
+        }
     }
 
     fun detectAll(
@@ -331,70 +350,77 @@ class CurrencyDetector(
         val prep = preprocess(bitmap, orientationDegrees, dumpDiagnosticDir)
         val prepTimeMs = (System.nanoTime() - t0) / 1_000_000.0
 
-        val tensor = OnnxTensor.createTensor(
-            env,
-            prep.tensorBuffer,
-            longArrayOf(1, 3, INPUT_SIZE.toLong(), INPUT_SIZE.toLong())
-        )
-
-        // 1. Coin Model
-        val t1 = System.nanoTime()
-        val coinResults = coinSession.run(mapOf(coinInputName to tensor))
-        val coinInferTimeMs = (System.nanoTime() - t1) / 1_000_000.0
-
-        @Suppress("UNCHECKED_CAST")
-        val rawCoinOutput = coinResults[0].value as Array<Array<FloatArray>>
-        val coinDetections = if (isCandidateMode) {
-            decodeAndNmsCandidate(
-                rawOutput = rawCoinOutput[0],
-                numClasses = COIN_CLASSES.size,
-                classNames = COIN_CLASSES,
-                prep = prep,
-                confThreshold = coinConfThreshold,
-                iouThreshold = 0.35f // Tighter inter-class NMS for coins
+        var tensor: OnnxTensor? = null
+        var coinResults: OrtSession.Result? = null
+        var noteResults: OrtSession.Result? = null
+        try {
+            tensor = OnnxTensor.createTensor(
+                env,
+                prep.tensorBuffer,
+                longArrayOf(1, 3, INPUT_SIZE.toLong(), INPUT_SIZE.toLong())
             )
-        } else {
-            decodeAndNmsCoins(
-                rawOutput = rawCoinOutput[0],
-                numClasses = COIN_CLASSES.size,
-                classNames = COIN_CLASSES,
-                prep = prep,
-                confThreshold = coinConfThreshold,
-                iouThreshold = 0.35f // Tighter inter-class NMS for coins
-            )
-        }
-        coinResults.close()
 
-        // 2. Banknote Model (reuses exact same preprocessed tensor!)
-        val t2 = System.nanoTime()
-        val noteResults = banknoteSession.run(mapOf(banknoteInputName to tensor))
-        val noteInferTimeMs = (System.nanoTime() - t2) / 1_000_000.0
+            // 1. Coin Model
+            val t1 = System.nanoTime()
+            coinResults = coinSession.run(mapOf(coinInputName to tensor))
+            val coinInferTimeMs = (System.nanoTime() - t1) / 1_000_000.0
 
-        @Suppress("UNCHECKED_CAST")
-        val rawNoteOutput = noteResults[0].value as Array<Array<FloatArray>>
-        val tDecode = System.nanoTime()
-        val rawNoteDetections = if (isCandidateMode) {
-            decodeAndNmsCandidate(
-                rawOutput = rawNoteOutput[0],
-                numClasses = BANKNOTE_CLASSES.size,
-                classNames = BANKNOTE_CLASSES,
-                prep = prep,
-                confThreshold = banknoteConfThreshold,
-                iouThreshold = iouThreshold
-            )
-        } else {
-            decodeAndNms(
-                rawOutput = rawNoteOutput[0],
-                numClasses = BANKNOTE_CLASSES.size,
-                classNames = BANKNOTE_CLASSES,
-                prep = prep,
-                confThreshold = banknoteConfThreshold,
-                iouThreshold = iouThreshold
-            )
-        }
-        val decodeTimeMs = (System.nanoTime() - tDecode) / 1_000_000.0
-        noteResults.close()
-        tensor.close()
+            @Suppress("UNCHECKED_CAST")
+            val rawCoinOutput = coinResults[0].value as Array<Array<FloatArray>>
+            val coinDetections = if (isCandidateMode) {
+                decodeAndNmsCandidate(
+                    rawOutput = rawCoinOutput[0],
+                    numClasses = COIN_CLASSES.size,
+                    classNames = COIN_CLASSES,
+                    prep = prep,
+                    confThreshold = coinConfThreshold,
+                    iouThreshold = 0.35f // Tighter inter-class NMS for coins
+                )
+            } else {
+                decodeAndNmsCoins(
+                    rawOutput = rawCoinOutput[0],
+                    numClasses = COIN_CLASSES.size,
+                    classNames = COIN_CLASSES,
+                    prep = prep,
+                    confThreshold = coinConfThreshold,
+                    iouThreshold = 0.35f // Tighter inter-class NMS for coins
+                )
+            }
+            coinResults.close()
+            coinResults = null
+
+            // 2. Banknote Model (reuses exact same preprocessed tensor!)
+            val t2 = System.nanoTime()
+            noteResults = banknoteSession.run(mapOf(banknoteInputName to tensor))
+            val noteInferTimeMs = (System.nanoTime() - t2) / 1_000_000.0
+
+            @Suppress("UNCHECKED_CAST")
+            val rawNoteOutput = noteResults[0].value as Array<Array<FloatArray>>
+            val tDecode = System.nanoTime()
+            val rawNoteDetections = if (isCandidateMode) {
+                decodeAndNmsCandidate(
+                    rawOutput = rawNoteOutput[0],
+                    numClasses = BANKNOTE_CLASSES.size,
+                    classNames = BANKNOTE_CLASSES,
+                    prep = prep,
+                    confThreshold = banknoteConfThreshold,
+                    iouThreshold = iouThreshold
+                )
+            } else {
+                decodeAndNms(
+                    rawOutput = rawNoteOutput[0],
+                    numClasses = BANKNOTE_CLASSES.size,
+                    classNames = BANKNOTE_CLASSES,
+                    prep = prep,
+                    confThreshold = banknoteConfThreshold,
+                    iouThreshold = iouThreshold
+                )
+            }
+            val decodeTimeMs = (System.nanoTime() - tDecode) / 1_000_000.0
+            noteResults.close()
+            noteResults = null
+            tensor.close()
+            tensor = null
 
         // 3. Cross-Model Mutual Exclusion & Minimum Physical Area Filtering
         val frameArea = prep.origWidth.toFloat() * prep.origHeight.toFloat()
@@ -570,6 +596,12 @@ class CurrencyDetector(
             unknownIdentityCount = unknownIdentityCount,
             rejectedIdentityDetections = rejectedIdentityDetections
         )
+        } finally {
+            coinResults?.close()
+            noteResults?.close()
+            tensor?.close()
+            prep.recycleBitmaps(sourceBitmap = bitmap)
+        }
     }
 
     private fun decodeAnchorBox(rawOutput: Array<FloatArray>, anchorIdx: Int, prep: PreprocessOutput): FloatArray {

@@ -32,6 +32,11 @@ class AppUpdateChannel(private val context: Context) {
         private const val SANETRA_PACKAGE_NAME = "com.sanetra.assistivevision"
         private const val METHOD_CHANNEL = "vision_assistant/app_update"
         private const val CONNECTIVITY_EVENT_CHANNEL = "vision_assistant/connectivity"
+        const val APPROVED_RELEASE_SIGNER_SHA256 =
+            "B3986507F0092F9296342FCA8FE12C7C6F2E63D4E9516399690BE422149A1389"
+        private val APPROVED_SIGNER_ALLOWLIST = setOf(
+            APPROVED_RELEASE_SIGNER_SHA256
+        )
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -236,6 +241,37 @@ class AppUpdateChannel(private val context: Context) {
         }
     }
 
+    private fun extractSignerCertSha256(pkgInfo: android.content.pm.PackageInfo): List<String> {
+        val certHashes = mutableListOf<String>()
+        val md = MessageDigest.getInstance("SHA-256")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val signingInfo = pkgInfo.signingInfo
+            if (signingInfo != null) {
+                val signatures = if (signingInfo.hasMultipleSigners()) {
+                    signingInfo.apkContentsSigners
+                } else {
+                    signingInfo.signingCertificateHistory
+                }
+                if (signatures != null) {
+                    for (sig in signatures) {
+                        val digest = md.digest(sig.toByteArray())
+                        certHashes.add(digest.joinToString("") { "%02X".format(it) })
+                    }
+                }
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            val signatures = pkgInfo.signatures
+            if (signatures != null) {
+                for (sig in signatures) {
+                    val digest = md.digest(sig.toByteArray())
+                    certHashes.add(digest.joinToString("") { "%02X".format(it) })
+                }
+            }
+        }
+        return certHashes
+    }
+
     private fun installApkAsync(
         apkFile: File,
         expectedPackageName: String,
@@ -264,15 +300,22 @@ class AppUpdateChannel(private val context: Context) {
 
         ioExecutor.execute {
             try {
-                // Verify the APK against the package ID in the validated release manifest.
+                val sigFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    PackageManager.GET_SIGNING_CERTIFICATES
+                } else {
+                    @Suppress("DEPRECATION")
+                    PackageManager.GET_SIGNATURES
+                }
+
+                // Verify the APK against the package ID and permanent release signing certificate.
                 val pkgInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     context.packageManager.getPackageArchiveInfo(
                         apkFile.absolutePath,
-                        PackageManager.PackageInfoFlags.of(0)
+                        PackageManager.PackageInfoFlags.of(sigFlags.toLong())
                     )
                 } else {
                     @Suppress("DEPRECATION")
-                    context.packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
+                    context.packageManager.getPackageArchiveInfo(apkFile.absolutePath, sigFlags)
                 }
 
                 if (pkgInfo == null || pkgInfo.packageName != expectedPackageName) {
@@ -281,6 +324,27 @@ class AppUpdateChannel(private val context: Context) {
                             mapOf(
                                 "started" to false,
                                 "error" to "Downloaded APK does not match the expected release package ID"
+                            )
+                        )
+                    }
+                    return@execute
+                }
+
+                val signers = extractSignerCertSha256(pkgInfo)
+                val isSignerApproved = signers.any { certHash ->
+                    APPROVED_SIGNER_ALLOWLIST.contains(certHash.uppercase())
+                }
+
+                if (!isSignerApproved) {
+                    Log.w(
+                        TAG,
+                        "APK signer validation failed for ${apkFile.name}. Found signers: $signers; Expected: $APPROVED_RELEASE_SIGNER_SHA256"
+                    )
+                    mainHandler.post {
+                        result.success(
+                            mapOf(
+                                "started" to false,
+                                "error" to "Downloaded APK signing certificate does not match the approved release signer"
                             )
                         )
                     }

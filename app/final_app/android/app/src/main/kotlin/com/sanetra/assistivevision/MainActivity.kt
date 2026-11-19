@@ -109,37 +109,40 @@ class MainActivity : FlutterActivity() {
         bisayaTtsChannel = BisayaTtsChannel(applicationContext).apply {
             register(flutterEngine)
         }
-        val evalAction = "${applicationContext.packageName}.SYNTH_KANNADA_EVAL"
-        val diagAction = "${applicationContext.packageName}.TTS_DIAGNOSTIC"
-        val ocrEvalAction = "${applicationContext.packageName}.OCR_EVAL_IMAGE"
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                when (intent?.action) {
-                    evalAction -> channel?.invokeMethod("onSynthKannadaEval", null)
-                    diagAction -> channel?.invokeMethod("onTtsDiagnostic", null)
-                    ocrEvalAction -> {
-                        val path = intent.getStringExtra("path") ?: ""
-                        val lang = intent.getStringExtra("lang")
-                        val speak = intent.getBooleanExtra("speak", true)
-                        channel?.invokeMethod(
-                            "onOcrEvalImage",
-                            mapOf("path" to path, "lang" to lang, "speak" to speak)
-                        )
+        val isDebuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        if (isDebuggable) {
+            val evalAction = "${applicationContext.packageName}.SYNTH_KANNADA_EVAL"
+            val diagAction = "${applicationContext.packageName}.TTS_DIAGNOSTIC"
+            val ocrEvalAction = "${applicationContext.packageName}.OCR_EVAL_IMAGE"
+            val receiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context?, intent: Intent?) {
+                    when (intent?.action) {
+                        evalAction -> channel?.invokeMethod("onSynthKannadaEval", null)
+                        diagAction -> channel?.invokeMethod("onTtsDiagnostic", null)
+                        ocrEvalAction -> {
+                            val path = intent.getStringExtra("path") ?: ""
+                            val lang = intent.getStringExtra("lang")
+                            val speak = intent.getBooleanExtra("speak", true)
+                            channel?.invokeMethod(
+                                "onOcrEvalImage",
+                                mapOf("path" to path, "lang" to lang, "speak" to speak)
+                            )
+                        }
                     }
                 }
             }
+            val filter = IntentFilter().apply {
+                addAction(evalAction)
+                addAction(diagAction)
+                addAction(ocrEvalAction)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                registerReceiver(receiver, filter)
+            }
+            ttsEvalReceiver = receiver
         }
-        val filter = IntentFilter().apply {
-            addAction(evalAction)
-            addAction(diagAction)
-            addAction(ocrEvalAction)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
-        } else {
-            registerReceiver(receiver, filter)
-        }
-        ttsEvalReceiver = receiver
     }
 
     private fun cancelPendingGestures() {
