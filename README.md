@@ -5,21 +5,21 @@
 Sanetra helps users identify Indian currency and read printed text using an Android phone. Currency recognition, OCR, and speech run on the device; an internet connection is used only for optional app-update checks and downloading a new release.
 
 <p align="center">
-  <a href="https://github.com/chethanone/Sanetra/releases/download/v2.1.3/Sanetra-v2.1.3-arm64.apk">
-    <img alt="Download Sanetra v2.1.3" src="https://img.shields.io/badge/Download-Android%20APK-111111?style=for-the-badge&logo=android&logoColor=white">
+  <a href="https://github.com/chethanone/Sanetra/releases/download/v2.2.0/Sanetra-v2.2.0-arm64.apk">
+    <img alt="Download Sanetra v2.2.0" src="https://img.shields.io/badge/Download-Android%20APK-111111?style=for-the-badge&logo=android&logoColor=white">
   </a>
-  <a href="https://github.com/chethanone/Sanetra/releases/tag/v2.1.3">
-    <img alt="Release v2.1.3" src="https://img.shields.io/badge/Release-v2.1.3-555555?style=for-the-badge">
+  <a href="https://github.com/chethanone/Sanetra/releases/tag/v2.2.0">
+    <img alt="Release v2.2.0" src="https://img.shields.io/badge/Release-v2.2.0-555555?style=for-the-badge">
   </a>
 </p>
 
-> **Current Android release:** v2.1.3 (versionCode 10) · arm64-v8a  
+> **Current Android release:** v2.2.0 (versionCode 11) · arm64-v8a  
 > **Package ID:** `com.sanetra.assistivevision`  
-> **Upgrading:** Existing `v2.0.0`–`v2.1.2` installations (`com.sanetra.assistivevision`) upgrade cleanly in place via the built-in update checker. Legacy `v1.0.0` (`com.visionassistant.vision_assistant.visionmission`) users must perform the first `v2.x` installation manually as a separate app.
+> **Upgrading:** Existing `v2.0.0`–`v2.1.3` installations (`com.sanetra.assistivevision`) upgrade cleanly in place via the built-in update checker. Legacy `v1.0.0` (`com.visionassistant.vision_assistant.visionmission`) users must perform the first `v2.x` installation manually as a separate app.
 
 ## What it does
 
-- **Indian currency recognition:** identifies and counts six banknote denominations (₹10, ₹20, ₹50, ₹100, ₹200 and ₹500) and four coin denominations (₹1, ₹2, ₹5 and ₹10). The detection pipeline includes identity verification and tracking to reduce false detections and unreliable totals.
+- **Indian currency recognition:** identifies and counts six banknote denominations (₹10, ₹20, ₹50, ₹100, ₹200 and ₹500) and four coin denominations (₹1, ₹2, ₹5 and ₹10). The detection pipeline includes identity verification, temporal tracking, and conservative visual anti-spoof checks to reject screen replays and low-confidence presentations. Visual denomination recognition assists with identifying notes and coins; it does not guarantee physical authenticity or replace bank-grade counterfeit detection.
 - **Multilingual text reading:** detects and reads printed English, Kannada and Hindi text. Kannada recognition uses a document/scene-aware routing approach; text geometry and reading order are considered during processing.
 - **Voice assistance:** provides spoken recognition results using the device's offline text-to-speech voices.
 - **Hands-free controls:** physical volume buttons control mode switching, OCR rereading and the currency language selector.
@@ -54,7 +54,7 @@ The active model files and their technical metadata are listed in [Model Catalog
 
 ## Download and install
 
-**[Download Sanetra v2.1.2 for Android (arm64-v8a)](https://github.com/chethanone/Sanetra/releases/download/v2.1.2/Sanetra-v2.1.2-arm64.apk)**
+**[Download Sanetra v2.2.0 for Android (arm64-v8a)](https://github.com/chethanone/Sanetra/releases/download/v2.2.0/Sanetra-v2.2.0-arm64.apk)**
 
 1. Download the APK from the release link above.
 2. Open the downloaded APK on an Android arm64 device.
@@ -64,7 +64,7 @@ The active model files and their technical metadata are listed in [Model Catalog
 
 Android requires user confirmation to install an APK. Sanetra does not silently install updates.
 
-**Release details:** [v2.1.2 release notes and APK](https://github.com/chethanone/Sanetra/releases/tag/v2.1.2) · [All releases](https://github.com/chethanone/Sanetra/releases) · [Third-party audio notices](THIRD_PARTY_NOTICES.md)
+**Release details:** [v2.2.0 release notes and APK](https://github.com/chethanone/Sanetra/releases/tag/v2.2.0) · [All releases](https://github.com/chethanone/Sanetra/releases) · [Third-party audio notices](THIRD_PARTY_NOTICES.md)
 
 ## Build from source
 

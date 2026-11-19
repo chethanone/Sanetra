@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.2.0 (2026-11-19)
+- **Pipeline Resource Lifecycle & Native Leak Fixes:** Refactored Android native camera frame processing to ensure all intermediate `Bitmap` allocations and ONNX `OnnxTensor` instances are deterministically closed in `finally` blocks, preventing GPU memory fragmentation and heap growth during extended continuous scanning sessions.
+- **Zero-Heap Direct Tensor Population:** Eliminated intermediate `FloatArray` heap allocations in native preprocessing (`CurrencyDetector.kt` and `PreprocessOutput.kt`); normalized pixel tensors are now streamed directly into native memory buffers.
+- **In-App Updater Certificate Pinning:** Enhanced `AppUpdateChannel.kt` with cryptographic signature verification that verifies APK signing certificates against the permanent release certificate SHA-256 allowlist (`B3986507F0092F9296342FCA8FE12C7C6F2E63D4E9516399690BE422149A1389`) prior to triggering system installation.
+- **Android Security Hardening:** Restricted internal diagnostic broadcast receiver (`MainActivity.kt`) strictly to debuggable builds; blocked cleartext network traffic via Android `network_security_config.xml`; configured secure auto-backup rules (`data_extraction_rules.xml` and `backup_rules.xml`).
+- **Fail-Closed Release Signing Configuration:** Updated Gradle build scripts (`build.gradle.kts`) to fail release builds immediately if production signing credentials or keystores are missing or unconfigured.
+- **Conservative Anti-Spoofing & Denomination Guidance:** Integrated screen-replay and photocopy detection safeguards into currency classification. Detections failing sharpness, lighting, or texture uniformity gates trigger conservative spoken guidance (`"Possible [Denomination] Rupee Note, not confirmed. Hold steady in better light and try again."`). Camera-based anti-spoofing assists with visual denomination recognition and does not guarantee genuine physical banknote authenticity.
+- **Validated On-Device Performance:** Verified on Nothing Phone (3a) Pro (Android 17 / SDK 37); sustained steady memory usage (~306 MB Native, ~33 MB Dalvik) with zero logcat crashes or performance degradation over continuous recognition sessions. All 140 automated Flutter unit/pipeline tests passing.
+
 ## v2.1.3 (2026-11-19)
 - **High-Contrast Vision Rupee Launcher Icon:** Replaced the legacy Android application launcher icon across all screen densities (`mdpi`, `hdpi`, `xhdpi`, `xxhdpi`, `xxxhdpi`, `anydpi-v26`) with the official Sanetra Vision Rupee branding.
 - **Adaptive Icon & Safe-Bound Alignment:** Scaled and centered the high-contrast white eye-and-rupee symbol on a pure black background (`#000000`), ensuring full visibility with zero edge clipping across both circular and rounded-rectangle launcher masks.
