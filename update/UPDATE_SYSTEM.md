@@ -2,6 +2,23 @@
 
 Sanetra runs **100% offline** for all currency recognition, OCR, flashlight, and TTS features. Network access is used **only** for optional update checks when internet connectivity is available.
 
+
+## Current release: v3.0.1
+
+The production source declares Sanetra **v3.0.1** with Android `versionCode: 14` and package ID `com.sanetra.assistivevision`. The corresponding production flavor is configured in the Android Gradle build.
+
+The public update manifest at `update/latest.json` is the authoritative version source for installed clients. **Do not advertise v3.0.1 in that manifest until the exact APK asset uploaded to the v3.0.1 GitHub Release has been retrieved and verified.** The manifest must contain the exact release asset filename and the SHA-256 digest computed from those exact APK bytes. A local build filename, a reported file size, or a release tag is not a substitute for verifying the uploaded asset.
+
+Release publication checklist:
+1. Confirm the v3.0.1 GitHub Release contains the production arm64 APK asset.
+2. Download that exact asset and independently calculate its SHA-256.
+3. Verify package ID, version name, version code, architecture and signing-certificate fingerprint.
+4. Update `update/latest.json` with the exact asset filename and verified digest.
+5. Fetch the public raw manifest URL and confirm it serves the new version and digest.
+6. Test update discovery and Android installer handoff on a compatible existing installation.
+
+Android installation remains user-approved; this updater cannot silently force an installation on every device. The current manifest's architecture restriction also means that only compatible `arm64-v8a` installations can use that APK.
+
 ## Architecture
 - **Manifest Source:** `https://raw.githubusercontent.com/chethanone/Sanetra/main/update/latest.json`
 - **Native Android Bridge:** `AppUpdateChannel.kt` (`vision_assistant/app_update` & `vision_assistant/connectivity`)
