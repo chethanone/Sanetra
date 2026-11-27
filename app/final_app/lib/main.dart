@@ -1733,7 +1733,7 @@ class _CameraScreenState extends State<CameraScreen>
                                     : (_isCurrencyMode
                                           ? (_currentDetections.isNotEmpty
                                                 ? 'DETECTED (${_currentDetections.length})'
-                                                : 'Offline')
+                                                : 'OFFLINE')
                                           : 'DOCUMENT OCR'),
                                 style: const TextStyle(
                                   color: Colors.white,
