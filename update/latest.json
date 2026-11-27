@@ -1,13 +1,13 @@
 {
-  "version": "2.2.0.1",
-  "versionCode": 12,
+  "version": "3.0.1.1",
+  "versionCode": 15,
   "minimumSupportedVersionCode": 2,
   "packageName": "com.sanetra.assistivevision",
   "platform": "android",
   "architecture": "arm64-v8a",
   "releaseType": "stable",
-  "apkAsset": "Sanetra-v2.2.0.1-arm64.apk",
-  "sha256": "911EF4E8376B0CACAF29AA54C13753D95288C31A569C6AE440E7332D9B7FACCE",
-  "releaseNotes": "Updated the launch splash and loading screen icon to display the official high-contrast Sanetra Vision Rupee branding across all Android versions.",
-  "releaseUrl": "https://github.com/chethanone/Sanetra/releases/tag/v2.2.0.1"
+  "apkAsset": "Sanetra-v3.0.1.1-arm64.apk",
+  "sha256": "E3BC95F8D6132FD25BE5DEA1271A1A3D0331B526D5AE2733691C54EA99EB9D69",
+  "releaseNotes": "Smart line-by-line OCR reading, multilingual script isolation, Kannada handwriting enhancement, strict currency Invalid vs Unrecognised gating, and refreshed OFFLINE status pill.",
+  "releaseUrl": "https://github.com/chethanone/Sanetra/releases/tag/v3.0.1.1"
 }

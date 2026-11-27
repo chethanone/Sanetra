@@ -5,24 +5,24 @@
 Sanetra helps users identify Indian currency and read printed text using an Android phone. Currency recognition, OCR, and speech run on the device. Internet access is used only for optional update checks and downloading a newer release.
 
 <p align="center">
-  <a href="https://github.com/chethanone/Sanetra/releases/tag/v3.0.1">
-    <img alt="Download Sanetra v3.0.1" src="https://img.shields.io/badge/Download-Android%20APK-111111?style=for-the-badge&logo=android&logoColor=white">
+  <a href="https://github.com/chethanone/Sanetra/releases/download/v3.0.1.1/Sanetra-v3.0.1.1-arm64.apk">
+    <img alt="Download Sanetra v3.0.1.1" src="https://img.shields.io/badge/Download-Android%20APK-111111?style=for-the-badge&logo=android&logoColor=white">
   </a>
-  <a href="https://github.com/chethanone/Sanetra/releases/tag/v3.0.1">
-    <img alt="Release v3.0.1" src="https://img.shields.io/badge/Release-v3.0.1-555555?style=for-the-badge">
+  <a href="https://github.com/chethanone/Sanetra/releases/tag/v3.0.1.1">
+    <img alt="Release v3.0.1.1" src="https://img.shields.io/badge/Release-v3.0.1.1-555555?style=for-the-badge">
   </a>
 </p>
 
-> **Current Android release:** v3.0.1 (versionCode 14) · arm64-v8a  
+> **Current Android release:** v3.0.1.1 (versionCode 15) · arm64-v8a  
 > **Package ID:** `com.sanetra.assistivevision`  
-> **Release:** [Sanetra v3.0.1 on GitHub Releases](https://github.com/chethanone/Sanetra/releases/tag/v3.0.1)  
-> **Upgrade path:** Compatible installations using `com.sanetra.assistivevision` can update in place when the installed version code is lower and the APK is signed with the same permanent release certificate. Legacy v1.0.0 installations use a different package ID and require the documented manual migration.
+> **Release:** [Sanetra v3.0.1.1 on GitHub Releases](https://github.com/chethanone/Sanetra/releases/tag/v3.0.1.1)  
+> **Upgrade path:** Compatible installations using `com.sanetra.assistivevision` (`v2.0.0`–`v2.2.0.1`) update in place via the in-app update checker when connected to the internet. Legacy `v1.0.0` installations (`com.visionassistant.vision_assistant.visionmission`) use a different package ID and require the documented manual migration.
 
 ## What it does
 
 - **Indian currency recognition:** identifies and counts supported Indian banknote and coin denominations. The production pipeline includes detection, identity/safety checks, temporal tracking and duplicate-announcement suppression. Currency guidance distinguishes a confirmed invalid/non-currency presentation (`INVALID`) from an uncertain or low-confidence observation (`UNRECOGNISED`). Visual checks assist denomination recognition; they do not guarantee physical authenticity or replace bank-grade counterfeit detection.
 - **OCR text reading:** captures and reads printed text on user request. The OCR pipeline includes text detection and recognition, spatial grouping, layout-aware reading order and handling for rotated or inverted text.
-- **Reading order and layout awareness (v3.0.1):** groups text regions into spatial blocks and reads lines in sequence to reduce jumping between columns or unrelated regions.
+- **Reading order and layout awareness:** groups text regions into spatial blocks and reads lines in sequence to reduce jumping between columns or unrelated regions.
 - **Multilingual script handling:** separates English, Hindi and Kannada text spans when they appear together, subject to recognition quality and the selected OCR models.
 - **Spoken symbol and unit expansion:** expands supported currency symbols, arithmetic operators, percentages, common units and packaging abbreviations into speech-friendly forms.
 - **Kannada handwriting handling:** includes image-processing improvements intended to preserve fine Kannada strokes and matras. Handwriting performance depends on writing quality and image conditions and should not be treated as guaranteed recognition.
@@ -45,17 +45,18 @@ After installation and setup, core recognition and speech features are designed 
 
 Sanetra does not require cloud OCR or cloud inference for its normal recognition workflow.
 
-## v3.0.1 release highlights
+## v3.0.1.1 release highlights
 
-- Improved OCR reading order using spatial blocks, line grouping and column-aware sequencing.
-- Improved handling of rotated and inverted text before speech output.
-- Separation of English, Hindi and Kannada script spans in mixed-language content.
-- Spoken expansion for supported currency symbols, arithmetic operators, units and packaging abbreviations.
-- Kannada handwriting image-processing refinements.
-- Currency result handling distinguishes `INVALID` from `UNRECOGNISED`, with corresponding spoken guidance and visual status treatment.
-- Currency-mode status indicator differentiates idle/offline state from active detections.
+- **Status Indicator:** Currency idle indicator displays `OFFLINE` with a glowing warm-yellow dot (`#FFD600`), switching to `DETECTED (N)` with a green dot (`#00E676`) upon detection.
+- **Spatial Line-by-Line OCR:** Systematically traverses bounding boxes line-by-line within columns to avoid jumping across independent sections.
+- **Orientation Normalization:** Image unwarping and reading-sequence normalization for inverted (180°), rotated, and curved text.
+- **Multilingual Script Isolation:** Segregates mixed English, Hindi, and Kannada script spans into coherent reading sentences.
+- **Spoken Symbol & Unit Expansion:** Expands currency symbols (`₹`, `$`, `€`, `£`, `¥`), arithmetic operators (`+`, `-`, `×`, `÷`, `=`), and packaging abbreviations (`%`, `@`, `kg`, `gm`, `ml`, `l`, etc.) into speech.
+- **Kannada Handwriting Recovery:** Preserves delicate Kannada loops, curves, and subscript matras using local adaptive thresholding.
+- **Currency Result Semantics:** Distinguishes `INVALID` (saying `"Invalid"` / `"अमान्य"` / `"ಅಮಾನ್ಯ"`) from `UNRECOGNISED` (providing positioning guidance) with corresponding red and amber visual treatment.
+- **Exhaustive Indian Currency Specifications:** Comprehensive physical dimensions, aspect ratios, color palettes, and motifs embedded for all Indian banknote series and coin denominations.
 
-The v3.0.1 release summary reports **53/53 automated regression tests passed** across the listed tracker, coin-safety, OCR layout/handwriting, flashlight and candidate-replay test groups. Automated tests are not a substitute for physical-device validation across all Android models and real-world conditions.
+The release summary reports **53/53 automated regression tests passed** across the tracker, coin-safety, OCR layout/handwriting, flashlight, candidate-replay, and updater test groups. Automated tests are not a substitute for physical-device validation across all Android models and real-world conditions.
 
 ## Technology
 
@@ -71,18 +72,17 @@ The active model files and technical metadata are listed in the [Model Catalog](
 
 ## Download and install
 
-**[Open the Sanetra v3.0.1 GitHub release](https://github.com/chethanone/Sanetra/releases/tag/v3.0.1)** and download the Android APK asset provided there.
+**[Download Sanetra v3.0.1.1 for Android (arm64-v8a)](https://github.com/chethanone/Sanetra/releases/download/v3.0.1.1/Sanetra-v3.0.1.1-arm64.apk)**
 
-1. Open the v3.0.1 release page.
-2. Download the APK asset for Android arm64 (`arm64-v8a`).
-3. Open the downloaded APK on a compatible Android device.
-4. Approve Android's request to install apps from that source, if prompted.
-5. Complete installation through Android's package installer.
-6. Ensure the required offline speech resources are available for the languages you intend to use.
+1. Download the APK asset from the release link above.
+2. Open the downloaded APK on an Android device running the supported `arm64-v8a` architecture.
+3. Approve Android's request to install apps from that source, if prompted.
+4. Complete installation through Android's package installer.
+5. Ensure the required Google TTS offline voice resources are available for your chosen language.
 
 Android requires user confirmation to install an APK. Sanetra does not silently install updates.
 
-**Release links:** [v3.0.1 release notes and assets](https://github.com/chethanone/Sanetra/releases/tag/v3.0.1) · [All releases](https://github.com/chethanone/Sanetra/releases) · [Third-party notices](THIRD_PARTY_NOTICES.md)
+**Release details:** [v3.0.1.1 release notes and APK](https://github.com/chethanone/Sanetra/releases/tag/v3.0.1.1) · [All releases](https://github.com/chethanone/Sanetra/releases) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 ## Build from source
 
@@ -118,11 +118,11 @@ The project uses release-signing credentials for production builds. Never commit
 
 ## Validation and known limitations
 
-The v3.0.1 release summary reports 53/53 automated regression tests passing. These tests cover the listed automated test groups; they do not establish universal accuracy or guarantee identical behavior on every physical Android device.
+The v3.0.1.1 release summary reports 53/53 automated regression tests passing. These tests cover the listed automated test groups; they do not establish universal accuracy or guarantee identical behavior on every physical Android device.
 
 Recognition quality depends on lighting, focus, text size, print and handwriting quality, currency condition, viewing angle and scene complexity. OCR may fail on unclear, heavily distorted or partially obscured text. Currency visual checks are not bank-grade counterfeit verification. Offline speech depends on compatible voice resources being installed or bundled for the selected language.
 
-The repository's earlier device-validation records identify a Nothing Phone (3a) Pro as a primary validation device for earlier releases. Do not infer that every device model has been physically tested for v3.0.1.
+The repository's earlier device-validation records identify a Nothing Phone (3a) Pro as a primary validation device for earlier releases. Do not infer that every device model has been physically tested for v3.0.1.1.
 
 ### Android release signing
 

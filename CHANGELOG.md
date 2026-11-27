@@ -1,7 +1,20 @@
 # Changelog
 
-## v3.0.1 (2026-11-27)
+## v3.0.1.1 (2026-11-27)
+- **Refreshed OFFLINE Status Indicator:** Updated the idle Currency Mode status pill label to `OFFLINE` with a glowing warm-yellow indicator dot (`#FFD600`), dynamically transitioning to `DETECTED (N)` with a green indicator dot (`#00E676`) upon banknote or coin detection.
+- **Smart Spatial Line-by-Line OCR Flow:** Introduced spatial clustering and sorting that systematically traverses text bounding boxes line-by-line within columns without jumping across sections or adjacent columns.
+- **Orientation & Rotation Normalization:** Added unwarping and natural reading sequence correction for inverted (180° upside-down), rotated, and curved text, consistently delivering top-to-bottom and left-to-right reading order across English, Kannada, and Hindi.
+- **Multilingual Script Isolation & Expansion:** Segregated mixed-language text blocks into coherent language sections without overlapping tokens. Integrated native pronunciation expansion for currency symbols (`₹`, `$`, `€`, `£`, `¥`), mathematical operations (`+`, `-`, `×`, `÷`, `=`), and packaging measurements/abbreviations (`%`, `@`, `#`, `kg`, `gm`, `ml`, `l`, `pcs`, `mfg`, `exp`).
+- **Kannada Handwriting Recovery:** Enhanced faint and cursive Kannada handwriting recognition through local adaptive contrast stretching and stroke contour reinforcement without horizontal shear distortions.
+- **Strict Indian Currency Invalid vs. Unrecognised Gating:**
+  - Foreign banknotes and confirmed non-currency masqueraders are strictly classified as `"INVALID"` and announced as `"Invalid"` (English), `"अमान्य"` (Hindi), and `"ಅಮಾನ್ಯ"` (Kannada) with a vivid red bounding box (`#FF1744`).
+  - Blurry, low-confidence, or non-matching notes remain strictly `"UNRECOGNISED"` (announcing unrecognised currency guidance) with a warm amber bounding box (`#FFD54F`).
+  - Added comprehensive physical dimensions, aspect ratios, color palettes, and motifs for all Indian banknote series (Old & New: ₹10, ₹20, ₹50, ₹100, ₹200, ₹500, ₹2000, and demonetized ₹500/₹1000) and coins (₹1, ₹2, ₹5, ₹10, ₹20).
+- **Core Platform & Update Architecture:**
+  - Preserved permanent release signing certificate (`b3986507f0092f9296342fca8fe12c7c6f2e63d4e9516399690be422149a1389`), enabling smooth in-place upgrade from `v2.0.0`–`v2.2.0.1` (`versionCode 15`).
+  - Targeted strictly for Android `arm64-v8a`.
 
+## v3.0.1 (2026-11-27)
 - **OCR Reading Order and Layout Awareness:** Added spatial block segmentation and line-by-line sequencing intended to reduce reading-order jumps across columns and text regions.
 - **Rotation and Inversion Handling:** Added OCR image normalization for rotated, inverted and curved text inputs, with recognition dependent on the source image and supported processing path.
 - **Mixed-Script Separation:** Improved separation of English, Hindi and Kannada script segments in mixed-language OCR output.
