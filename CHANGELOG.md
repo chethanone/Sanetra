@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.0.1 (2026-11-27)
+
+- **OCR Reading Order and Layout Awareness:** Added spatial block segmentation and line-by-line sequencing intended to reduce reading-order jumps across columns and text regions.
+- **Rotation and Inversion Handling:** Added OCR image normalization for rotated, inverted and curved text inputs, with recognition dependent on the source image and supported processing path.
+- **Mixed-Script Separation:** Improved separation of English, Hindi and Kannada script segments in mixed-language OCR output.
+- **Spoken Symbol and Unit Expansion:** Added spoken-form handling for supported currency symbols, arithmetic operators, percentages, common measurement units and packaging abbreviations.
+- **Kannada Handwriting Image Processing:** Added local adaptive thresholding and stroke-contour morphology refinements intended to preserve delicate loops, curves and matras. This is not a guarantee of unrestricted handwriting recognition.
+- **OCR Entry Interaction:** Improved entry into the user-triggered OCR reading flow.
+- **Currency Result Semantics:** Distinguished `INVALID` results for confirmed invalid/non-currency masqueraders from `UNRECOGNISED` results for uncertain, blurry or low-confidence observations, with corresponding localized spoken guidance and visual treatment.
+- **Currency Reference Coverage:** Expanded currency reference specifications for note series and coin denominations. Reference specifications do not by themselves establish detector support or counterfeit authenticity verification for every listed issue.
+- **Currency Status Indicator:** Added distinct idle/offline and active-detection status indication.
+- **Automated Regression:** Release summary reports 53/53 automated regression tests passing across the listed tracker, coin-safety, OCR layout/handwriting, flashlight and candidate-replay test groups.
+
 ## v2.2.0.1 (2026-11-19)
 - **Splash & Loading Icon Alignment:** Replaced the legacy loading screen artwork (`drawable-nodpi/splash_logo.png`) with the official high-contrast Sanetra Vision Rupee branding centered on a pure black background (`#000000`).
 - **Android 12+ (API 31+) SplashScreen Support:** Added dedicated Android 12+ theme configurations (`values-v31` and `values-night-v31`), binding `windowSplashScreenAnimatedIcon` and `windowSplashScreenBackground` directly to the new Vision Rupee logo.
