@@ -120,19 +120,45 @@ class CurrencySpeechFormatter {
 
   /// Build natural, unambiguous English speech for a [CurrencySafetyAssessment].
   static String formatAssessmentEnglish(CurrencySafetyAssessment assessment) {
+    final bool isInvalid = assessment.reasons.contains('INVALID_CURRENCY_DETECTED') ||
+        assessment.reasons.contains('FOREIGN_CURRENCY_DETECTED') ||
+        assessment.spokenMessage == 'Invalid' ||
+        assessment.screenedDetections.any((d) => d.denomination == 'INVALID');
+    final bool isUnrecognised = assessment.reasons.contains('UNRECOGNISED_CURRENCY') ||
+        assessment.reasons.contains('IDENTITY_UNKNOWN') ||
+        assessment.spokenMessage.contains('Unrecognised') ||
+        assessment.screenedDetections.any((d) => d.denomination == 'UNRECOGNISED');
+
+    if (isInvalid) {
+      return 'Invalid';
+    }
+
     switch (assessment.status) {
       case AnnouncementSafetyStatus.empty:
+        if (isUnrecognised) {
+          return 'Unrecognised currency. Hold steady and try again.';
+        }
         return 'No currency detected. Please hold closer.';
       case AnnouncementSafetyStatus.conflictingOrUncertain:
+        if (isUnrecognised) {
+          return 'Unrecognised currency. Hold steady and try again.';
+        }
+        if (assessment.spokenMessage.isNotEmpty) {
+          return assessment.spokenMessage;
+        }
         if (assessment.reasons.contains('MERGED_BOX_SUSPECTED') ||
             assessment.reasons.contains('UNCERTAIN_COUNT')) {
           return 'Some notes are unclear or overlapping. Please spread them apart and try again.';
         }
-        return 'Denomination conflict detected. Please adjust lighting or angle and try again.';
+        return 'Difficult to denominate. Please adjust lighting or angle and try again.';
       case AnnouncementSafetyStatus.tentativeSingle:
-        final d = assessment.screenedDetections.first;
-        final item = formatEnglishGroup(d.denomination, d.value, 1);
-        return 'Possible $item, not confirmed. Hold steady in better light and try again.';
+        if (isUnrecognised) {
+          return 'Unrecognised currency. Hold steady and try again.';
+        }
+        if (assessment.spokenMessage.isNotEmpty) {
+          return assessment.spokenMessage;
+        }
+        return 'Difficult to denominate. Please hold steady in better light.';
       case AnnouncementSafetyStatus.confirmedSingle:
         final d = assessment.screenedDetections.first;
         return '${_capitalize(formatEnglishGroup(d.denomination, d.value, 1))}.';
@@ -297,18 +323,40 @@ class CurrencySpeechFormatter {
 
   /// Build natural Hindi speech for a [CurrencySafetyAssessment].
   static String formatAssessmentHindi(CurrencySafetyAssessment assessment) {
+    final bool isInvalid = assessment.reasons.contains('INVALID_CURRENCY_DETECTED') ||
+        assessment.reasons.contains('FOREIGN_CURRENCY_DETECTED') ||
+        assessment.spokenMessage == 'Invalid' ||
+        assessment.screenedDetections.any((d) => d.denomination == 'INVALID');
+    final bool isUnrecognised = assessment.reasons.contains('UNRECOGNISED_CURRENCY') ||
+        assessment.reasons.contains('IDENTITY_UNKNOWN') ||
+        assessment.spokenMessage.contains('Unrecognised') ||
+        assessment.screenedDetections.any((d) => d.denomination == 'UNRECOGNISED');
+
+    if (isInvalid) {
+      return 'अमान्य';
+    }
+
     switch (assessment.status) {
       case AnnouncementSafetyStatus.empty:
+        if (isUnrecognised) {
+          return 'अपरिचित मुद्रा। स्थिर रखें और फिर प्रयास करें।';
+        }
         return 'कोई मुद्रा नहीं मिली। कृपया पास लाएँ।';
       case AnnouncementSafetyStatus.conflictingOrUncertain:
+        if (isUnrecognised) {
+          return 'अपरिचित मुद्रा। स्थिर रखें और फिर प्रयास करें।';
+        }
         if (assessment.reasons.contains('MERGED_BOX_SUSPECTED') ||
             assessment.reasons.contains('UNCERTAIN_COUNT')) {
           return 'कुछ नोट स्पष्ट नहीं हैं या एक दूसरे के ऊपर हैं। कृपया अलग करके फिर प्रयास करें।';
         }
         return 'मूल्य स्पष्ट नहीं है। कृपया रोशनी या कोण ठीक करके फिर प्रयास करें।';
       case AnnouncementSafetyStatus.tentativeSingle:
+        if (isUnrecognised) {
+          return 'अपरिचित मुद्रा। स्थिर रखें और फिर प्रयास करें।';
+        }
         final d = assessment.screenedDetections.first;
-        return 'संभवतः ${formatHindiGroup(d.denomination, d.value, 1)}, पुष्टि नहीं हुई। स्थिर रखें।';
+        return '${formatHindiGroup(d.denomination, d.value, 1)}।';
       case AnnouncementSafetyStatus.confirmedSingle:
         final d = assessment.screenedDetections.first;
         return '${formatHindiGroup(d.denomination, d.value, 1)}।';

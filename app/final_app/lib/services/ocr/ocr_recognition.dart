@@ -8,6 +8,7 @@ import 'ocr_preprocessing.dart';
 import 'ocr_postprocessing.dart';
 import 'ocr_result.dart';
 import 'ocr_model_loader.dart';
+import 'ocr_symbol_normalizer.dart';
 
 class _DecodedResult {
   final String text;
@@ -182,12 +183,25 @@ class OcrRecognitionService {
     for (final rune in compact.runes) {
       totalCount++;
       if (language == 'kn-IN') {
-        if (rune >= 0x0C80 && rune <= 0x0CFF) nativeCount++;
+        if (rune >= 0x0C80 && rune <= 0x0CFF) {
+          nativeCount++;
+        } else if ((rune >= 0x0030 && rune <= 0x0039) ||
+            OcrSymbolNormalizer.isSymbolRune(rune)) {
+          nativeCount++;
+        }
       } else if (language == 'hi-IN') {
-        if (rune >= 0x0900 && rune <= 0x097F) nativeCount++;
+        if (rune >= 0x0900 && rune <= 0x097F) {
+          nativeCount++;
+        } else if ((rune >= 0x0030 && rune <= 0x0039) ||
+            OcrSymbolNormalizer.isSymbolRune(rune)) {
+          nativeCount++;
+        }
       } else {
-        // English / Latin + digits + common ASCII punctuation
-        if (rune >= 0x0021 && rune <= 0x007E) nativeCount++;
+        // English / Latin + digits + common symbols
+        if ((rune >= 0x0021 && rune <= 0x007E) ||
+            OcrSymbolNormalizer.isSymbolRune(rune)) {
+          nativeCount++;
+        }
       }
     }
     return (
@@ -341,13 +355,29 @@ class OcrRecognitionService {
     return decoded;
   }
 
+  /// Clean up common CTC artifacts in Kannada script output:
+  /// - Removes orphaned combining marks at word starts (e.g. ಾ, ಿ, ್ without a base consonant)
+  /// - Collapses duplicate viramas (e.g. ್್ -> ್)
+  /// - Normalizes combining sequences
+  static String cleanKannadaUnicode(String text) {
+    if (text.isEmpty) return text;
+    var cleaned = text.replaceAll(RegExp(r'\u0CCD{2,}'), '\u0CCD');
+    cleaned = cleaned.replaceAllMapped(
+      RegExp(r'(^|\s)[\u0CBE-\u0CD6\u0CCD]+'),
+      (m) => m[1] ?? '',
+    );
+    cleaned = cleaned.replaceAll(RegExp(r'\s{2,}'), ' ').trim();
+    return cleaned;
+  }
+
   Future<_DecodedResult?> _runKannadaRecognizer(
     img.Image crop, {
     List<bool>? inkColumns,
     bool allowSceneFallback = true,
+    bool isHandwriting = false,
   }) async {
     _DecodedResult? tier1;
-    if (_sessionKa != null && _dictKa.isNotEmpty) {
+    if (_sessionKa != null && _dictKa.isNotEmpty && !isHandwriting) {
       final prepKa = OcrPreprocessing.prepareRecognitionTensor(crop);
       OrtValue? kaTensor;
       try {
@@ -371,11 +401,13 @@ class OcrRecognitionService {
       }
     }
 
+    // Always run Arjuna SVTRv2 (tier2) if tier1 is null, low confidence, handwriting, or has gaps
     final bool needsSceneFallback = allowSceneFallback &&
         _sessionKaScene != null &&
         _dictKaScene.isNotEmpty &&
         (tier1 == null ||
-            tier1.confidence < 0.72 ||
+            isHandwriting ||
+            tier1.confidence < 0.88 ||
             tier1.nativeCharCount < 2 ||
             tier1.hasUncoveredInkGap);
     if (!needsSceneFallback) {
@@ -386,15 +418,17 @@ class OcrRecognitionService {
     if (tier2 == null) return tier1;
     if (tier1 == null) return tier2;
 
-    double kaScore(_DecodedResult r) =>
-        r.confidence +
-        r.nativeScriptRatio * 0.08 +
-        (r.nativeCharCount >= 2 ? 0.05 : 0.0);
+    double kaScore(_DecodedResult r) {
+      final nativeBonus = math.min(0.20, r.nativeCharCount * 0.04);
+      final scriptBonus = r.nativeScriptRatio * 0.15;
+      final gapPenalty = r.hasUncoveredInkGap ? 0.10 : 0.0;
+      return r.confidence + scriptBonus + nativeBonus - gapPenalty;
+    }
 
-    if (kaScore(tier2) > kaScore(tier1)) {
+    if (kaScore(tier2) >= kaScore(tier1)) {
       debugPrint(
-        '[OCR-REC-SCENE] Tier2 rescued "${tier1.text}"(${(tier1.confidence * 100).toStringAsFixed(0)}%) '
-        '-> "${tier2.text}"(${(tier2.confidence * 100).toStringAsFixed(0)}%)',
+        '[OCR-REC-SCENE] Tier2 (Arjuna SVTRv2) selected "${tier2.text}"(${(tier2.confidence * 100).toStringAsFixed(0)}%) '
+        'over Tier1 "${tier1.text}"(${(tier1.confidence * 100).toStringAsFixed(0)}%)',
       );
       return tier2;
     }
@@ -546,6 +580,63 @@ class OcrRecognitionService {
           inkCols = ink180;
           single = res180;
           orientationDegrees = 180;
+        }
+      }
+
+      // For curved text: also check horizontally flipped unwrapping in case curve was traced in reverse
+      if (polygon.isCurved && (single == null || single.best.confidence < 0.78)) {
+        final cropFlipped = img.copyFlip(rawCrop, direction: img.FlipDirection.horizontal);
+        final inkFlipped = computeInkColumns(cropFlipped);
+        final resFlipped = await _recognizeCropTensor(
+          crop: cropFlipped,
+          inkCols: inkFlipped,
+          preferredLanguage: preferredLanguage,
+          allowUncoveredGapFastPath: false,
+        );
+        final currentScore = scoreCandidate(single);
+        final sFlipped = scoreCandidate(resFlipped);
+        if (resFlipped != null && (single == null || sFlipped > currentScore + 0.06)) {
+          crop = cropFlipped;
+          inkCols = inkFlipped;
+          single = resFlipped;
+          orientationDegrees = 0;
+        }
+      }
+
+      // Handwriting & low-contrast rescue retry
+      final bool isKannadaContext = preferredLanguage == 'kn-IN' ||
+          (single?.resKa != null &&
+              ((single!.resKa!.nativeCharCount >= 1) ||
+                  single!.resKa!.confidence >= 0.40));
+
+      final bool needsHandwritingRescue = single == null ||
+          single.best.confidence < 0.78 ||
+          single.selectedText.trim().length <= 2 ||
+          (isKannadaContext &&
+              (single.resKa == null || single.resKa!.confidence < 0.82));
+
+      if (needsHandwritingRescue) {
+        final img.Image transformedCrop;
+        if (isKannadaContext) {
+          // Use specialized Kannada local adaptive enhancement, NO destructive shear on circular loops!
+          transformedCrop = OcrPreprocessing.enhanceCropForKannadaHandwriting(crop);
+        } else {
+          final enhanced = OcrPreprocessing.enhanceCropForHandwriting(crop);
+          transformedCrop = OcrPreprocessing.deSlantCrop(enhanced);
+        }
+
+        final inkHw = computeInkColumns(transformedCrop);
+        final resHw = await _recognizeCropTensor(
+          crop: transformedCrop,
+          inkCols: inkHw,
+          preferredLanguage: preferredLanguage,
+          allowUncoveredGapFastPath: false,
+        );
+        if (resHw != null &&
+            (single == null || scoreCandidate(resHw) > scoreCandidate(single) + 0.03)) {
+          crop = transformedCrop;
+          inkCols = inkHw;
+          single = resHw;
         }
       }
     }
@@ -751,7 +842,7 @@ class OcrRecognitionService {
           resKa = await _runKannadaRecognizer(
             crop,
             inkColumns: inkCols,
-            allowSceneFallback: resEn == null || resEn.confidence < 0.70,
+            allowSceneFallback: true,
           );
         }
       } else {
@@ -777,7 +868,7 @@ class OcrRecognitionService {
           resKa = await _runKannadaRecognizer(
             crop,
             inkColumns: inkCols,
-            allowSceneFallback: resEn == null || resEn.confidence < 0.70,
+            allowSceneFallback: true,
           );
           resHi = await _runRecognizer(
             _sessionHi,
@@ -792,18 +883,18 @@ class OcrRecognitionService {
       }
 
       // Build eligible candidates:
-      // - Never allow English confidence to override clear Kannada or Hindi script.
+      // Strong Latin candidate requires solid confidence and high script purity
       final bool strongLatinCandidate = resEn != null &&
           resEn.text.length >= 3 &&
-          resEn.nativeScriptRatio >= 0.90 &&
-          resEn.confidence >= 0.65 &&
+          resEn.nativeScriptRatio >= 0.95 &&
+          resEn.confidence >= 0.82 &&
           !resEn.hasUncoveredInkGap;
 
-      final int minKaChars = (preferredLanguage == 'kn-IN' && !strongLatinCandidate) ? 1 : 2;
-      final double minKaRatio = (preferredLanguage == 'kn-IN') ? 0.50 : 0.70;
+      final int minKaChars = 1;
+      final double minKaRatio = (preferredLanguage == 'kn-IN') ? 0.35 : 0.50;
       final double minKaConf = strongLatinCandidate
-          ? (resEn.confidence + 0.06)
-          : (preferredLanguage == 'kn-IN' ? 0.40 : 0.60);
+          ? (resEn.confidence - 0.05)
+          : ((preferredLanguage == 'kn-IN') ? 0.35 : 0.48);
 
       final int minHiChars = (preferredLanguage == 'hi-IN' && !strongLatinCandidate) ? 1 : 2;
       final double minHiRatio = (preferredLanguage == 'hi-IN') ? 0.50 : 0.65;
@@ -845,32 +936,51 @@ class OcrRecognitionService {
         candidates.add(fallback.first);
       }
 
-      // If an Indic recognizer produced >= 2 native characters at >= 0.65 confidence
-      // and >= 0.70 native script ratio, prefer it over English unless English is
-      // meaningfully higher and covers the ink without gaps.
+      // If an Indic recognizer produced native characters, prefer it over English
+      // unless English is overwhelmingly confident and covers the ink without gaps.
       candidates.sort((a, b) => b.confidence.compareTo(a.confidence));
       var best = candidates.first;
       for (final c in candidates) {
-        if ((c.language == 'kn-IN' || c.language == 'hi-IN') &&
+        if (c.language == 'kn-IN' &&
+            c.nativeCharCount >= 1 &&
+            c.nativeScriptRatio >= 0.40 &&
+            c.confidence >= 0.45 &&
+            best.language == 'en-IN') {
+          if (best.hasUncoveredInkGap ||
+              best.confidence < c.confidence + 0.20 ||
+              preferredLanguage == 'kn-IN') {
+            best = c;
+            break;
+          }
+        } else if (c.language == 'hi-IN' &&
             c.nativeCharCount >= 2 &&
-            c.nativeScriptRatio >= 0.75 &&
-            c.confidence >= 0.65 &&
-            best.language == 'en-IN' &&
-            (best.hasUncoveredInkGap || best.confidence < c.confidence + 0.15)) {
-          best = c;
-          break;
+            c.nativeScriptRatio >= 0.70 &&
+            c.confidence >= 0.55 &&
+            best.language == 'en-IN') {
+          if (best.hasUncoveredInkGap ||
+              best.confidence < c.confidence + 0.15 ||
+              preferredLanguage == 'hi-IN') {
+            best = c;
+            break;
+          }
         }
       }
 
       // Calibrated multi-signal quality control:
       // Reject garbled/low-confidence fragments rather than speaking noise.
-      final text = best.text.replaceAll(RegExp(r'\s+'), ' ').trim();
+      var text = best.text.replaceAll(RegExp(r'\s+'), ' ').trim();
+      if (best.language == 'kn-IN') {
+        text = cleanKannadaUnicode(text);
+      }
+      final bool isSingleSymbol = text.runes.length == 1 &&
+          OcrSymbolNormalizer.isSymbolRune(text.runes.first);
       if (text.isEmpty ||
           (text.length == 1 &&
               !RegExp(r'[0-9a-zA-Z\u0C80-\u0CFF\u0900-\u097F]')
-                  .hasMatch(text)) ||
+                  .hasMatch(text) &&
+              !isSingleSymbol) ||
           best.confidence < 0.45 ||
-          (text.length < 4 && best.minCharConfidence < 0.20) ||
+          (text.length < 4 && best.minCharConfidence < 0.20 && !isSingleSymbol) ||
           (crop.height < 12 && best.confidence < 0.65)) {
         debugPrint(
           '[OCR-QC] Rejected region: text="$text" conf=${best.confidence.toStringAsFixed(3)} '
@@ -879,10 +989,16 @@ class OcrRecognitionService {
         return null;
       }
 
-      bool uncertain = best.confidence < 0.68 || best.minCharConfidence < 0.38;
+      bool uncertain = best.confidence < 0.62 || best.minCharConfidence < 0.28;
       if (candidates.length >= 2 &&
           (best.confidence - candidates[1].confidence).abs() < 0.08) {
-        uncertain = true;
+        if (best.language != 'en-IN' &&
+            candidates[1].language == 'en-IN' &&
+            best.nativeCharCount >= 1) {
+          uncertain = false;
+        } else {
+          uncertain = true;
+        }
       }
 
       final selectedLang =

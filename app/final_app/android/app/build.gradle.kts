@@ -33,8 +33,8 @@ android {
         // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
         // You can force using the value of versionCode by specifying the `-P force-version-code-ignoring-abi=true`
         // flag during build.
-        versionCode = 12
-        versionName = "2.2.0.1"
+        versionCode = 14
+        versionName = "3.0.1"
         manifestPlaceholders["appLabel"] = "Vision Assistant"
     }
 
@@ -55,6 +55,12 @@ android {
             applicationId = "com.sanetra.assistivevision.candidate"
             manifestPlaceholders["appLabel"] = "Sanetra Candidate"
             resValue("string", "app_name", "Sanetra Candidate")
+        }
+        create("phase10candidate") {
+            dimension = "mode"
+            applicationId = "com.sanetra.assistivevision.phase10candidate"
+            manifestPlaceholders["appLabel"] = "Sanetra Phase 10 Candidate"
+            resValue("string", "app_name", "Sanetra Phase 10 Candidate")
         }
         create("candidate_d3") {
             dimension = "mode"

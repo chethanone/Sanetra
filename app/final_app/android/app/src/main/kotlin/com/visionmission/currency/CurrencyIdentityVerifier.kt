@@ -13,7 +13,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 data class IdentityVerifyResult(
-    val state: String, // CONFIRMED_INDIAN, FOREIGN_CURRENCY, NON_CURRENCY, UNKNOWN
+    val state: String, // CONFIRMED_INDIAN, INVALID, UNKNOWN
     val pForeign: Float,
     val pIndian: Float,
     val pNonCurrency: Float,
@@ -37,6 +37,13 @@ class CurrencyIdentityVerifier(
         val MEAN = floatArrayOf(0.485f, 0.456f, 0.406f)
         val STD = floatArrayOf(0.229f, 0.224f, 0.225f)
         val CLASSES = arrayOf("FOREIGN_CURRENCY", "INDIAN_CURRENCY", "NON_CURRENCY")
+
+        // Strict thresholds to ensure ONLY genuine, positive foreign currency triggers foreign announcements.
+        // Unrecognised notes must STAY unrecognised (UNKNOWN), never simply assumed foreign!
+        const val P_FOREIGN_STRICT_THR = 0.70f
+        const val FOREIGN_MARGIN_STRICT_THR = 0.20f
+        const val P_NON_CURRENCY_THR = 0.60f
+        const val NON_CURRENCY_MARGIN_THR = 0.15f
     }
 
     val loadTimeMs: Double
@@ -176,14 +183,38 @@ class CurrencyIdentityVerifier(
         }
 
         val state = when {
+            // Class 1: Confirmed Indian Currency
             top1Idx == 1 -> {
                 if (probs[1] >= pIndianThreshold && margin >= marginThreshold) {
                     "CONFIRMED_INDIAN"
                 } else {
+                    // Below Indian threshold or ambiguous margin: STAY UNKNOWN (unrecognised)!
+                    // An Indian currency note that is blurry, angled, or low light must stay UNKNOWN, never called INVALID!
                     "UNKNOWN"
                 }
             }
-            probs[top1Idx] >= 0.50f && margin >= 0.05f -> CLASSES[top1Idx]
+
+            // Class 0: Foreign Currency (definitively does NOT match any Indian currency)
+            top1Idx == 0 -> {
+                if (probs[0] >= P_FOREIGN_STRICT_THR && margin >= FOREIGN_MARGIN_STRICT_THR) {
+                    // Verified foreign banknote shown to blind user: CONFIRMED INVALID
+                    "INVALID"
+                } else {
+                    // Ambiguous or low-confidence candidate stays UNKNOWN (unrecognised)!
+                    "UNKNOWN"
+                }
+            }
+
+            // Class 2: Non-Currency (definitively fake note, flyer, paper, background)
+            top1Idx == 2 -> {
+                if (probs[2] >= P_NON_CURRENCY_THR && margin >= NON_CURRENCY_MARGIN_THR) {
+                    // Verified non-currency object masquerading as note: CONFIRMED INVALID
+                    "INVALID"
+                } else {
+                    "UNKNOWN"
+                }
+            }
+
             else -> "UNKNOWN"
         }
 

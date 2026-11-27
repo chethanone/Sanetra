@@ -83,6 +83,8 @@ class CurrencyDetection {
   double get width => math.max(0.0, x2 - x1);
   double get height => math.max(0.0, y2 - y1);
   double get area => width * height;
+  double get centerX => (x1 + x2) / 2.0;
+  double get centerY => (y1 + y2) / 2.0;
   bool get isCoin => type == 'coin' || denomination.contains('COIN') || classId >= 6;
   bool get isConfirmed => confirmationState == DetectionConfirmationState.confirmed;
   bool get isTentative => confirmationState == DetectionConfirmationState.tentative;

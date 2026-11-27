@@ -266,5 +266,61 @@ void main() {
       await failingTorch.dispose();
       await controllerStream.close();
     });
+
+    test('Manual torch toggle (ON or OFF) sets override and prevents auto-retrigger', () async {
+      var now = DateTime(2026, 11, 16, 8, 0, 0);
+      final torchCalls = <bool>[];
+      final controllerStream = StreamController<double>.broadcast();
+
+      final controller = AutoFlashlightController(
+        onSetTorch: (enabled) async {
+          torchCalls.add(enabled);
+          return true;
+        },
+        onAnnounce: (text, {required language}) async {},
+        getSpeechLanguage: () => 'en-IN',
+        ambientLightStream: controllerStream.stream,
+        checkLightSensorAvailable: () async => true,
+        checkTorchAvailable: () async => true,
+        checkExternalTorchOn: () async => false,
+        now: () => now,
+      );
+
+      await controller.startMonitoring(RecognitionTorchMode.currency);
+
+      // User manually turns torch OFF
+      controller.setManualTorchState(false);
+      expect(controller.manualTorchOverride, isTrue);
+
+      // Pitch-dark ambient light (< 3 lux) enters
+      for (var i = 0; i < 5; i++) {
+        controller.processLuxReading(1.0);
+      }
+      now = now.add(const Duration(seconds: 10));
+      controller.processLuxReading(1.0);
+      await Future<void>.delayed(Duration.zero);
+
+      // Must NOT turn torch ON because manual override is respected!
+      expect(torchCalls, isEmpty);
+      expect(controller.controllerOwnsTorch, isFalse);
+
+      // User manually turns torch ON
+      controller.setManualTorchState(true);
+      expect(controller.manualTorchOverride, isTrue);
+
+      // Bright light enters
+      for (var i = 0; i < 5; i++) {
+        controller.processLuxReading(200.0);
+      }
+      now = now.add(const Duration(seconds: 10));
+      controller.processLuxReading(200.0);
+      await Future<void>.delayed(Duration.zero);
+
+      // Auto-off suspended
+      expect(torchCalls, isEmpty);
+
+      await controller.dispose();
+      await controllerStream.close();
+    });
   });
 }

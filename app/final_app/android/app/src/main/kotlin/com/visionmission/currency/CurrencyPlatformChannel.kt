@@ -52,10 +52,14 @@ class CurrencyPlatformChannel(
     private fun usesFinalIdentityCurrencyPipeline(): Boolean =
         isIdentityCandidatePackage() || isSanetraProductionPackage()
 
+    private fun isPhase10CandidatePackage(): Boolean =
+        context.packageName.endsWith(".phase10candidate")
+
     // Diagnostic broadcast receiver remains limited to candidate/test builds.
     private fun isCandidatePackage(): Boolean =
         context.packageName.endsWith(".candidate") ||
             context.packageName.contains(".candidate_") ||
+            isPhase10CandidatePackage() ||
             isIdentityCandidatePackage()
 
     fun register(flutterEngine: FlutterEngine) {
@@ -116,13 +120,18 @@ class CurrencyPlatformChannel(
     private fun handleInitModels(call: MethodCall, result: MethodChannel.Result) {
         backgroundExecutor.execute {
             try {
+                val isPhase10 = isPhase10CandidatePackage()
                 val isCandidateApp = isCandidatePackage() || isSanetraProductionPackage()
-                val defaultCoin = if (isCandidateApp) {
+                val defaultCoin = if (isPhase10) {
+                    "assets/models/currency/candidates/indian_coin_phase4n_candidate.onnx"
+                } else if (isCandidateApp) {
                     "assets/models/currency/candidates/indian_coin_phase4n_candidate.onnx"
                 } else {
                     "assets/models/currency/indian_coin_yolov8n.onnx"
                 }
-                val defaultBanknote = if (isCandidateApp) {
+                val defaultBanknote = if (isPhase10) {
+                    "assets/models/currency/candidates/indian_banknote_phase4l_candidate.onnx"
+                } else if (isCandidateApp) {
                     "assets/models/currency/candidates/indian_banknote_phase4l_candidate.onnx"
                 } else {
                     "assets/models/currency/indian_banknote_yolov8n.onnx"
@@ -133,11 +142,13 @@ class CurrencyPlatformChannel(
                 val forceProdBaseline = !isSanetraProductionPackage() && isCandidateApp && (call.argument<Boolean>("forceProductionBaseline") == true)
                 val enforceIdentityDefaults = usesFinalIdentityCurrencyPipeline() && !forceProdBaseline
                 val coinModelArg = when {
+                    isPhase10 -> defaultCoin
                     enforceIdentityDefaults -> defaultCoin
                     isCandidateApp -> call.argument<String>("coinModelAsset") ?: defaultCoin
                     else -> defaultCoin
                 }
                 val banknoteModelArg = when {
+                    isPhase10 -> defaultBanknote
                     enforceIdentityDefaults -> defaultBanknote
                     isCandidateApp -> call.argument<String>("banknoteModelAsset") ?: defaultBanknote
                     else -> defaultBanknote
@@ -155,10 +166,11 @@ class CurrencyPlatformChannel(
                 val coinFilePath = resolveModelPath(coinModelArg, coinFallback)
                 val banknoteFilePath = resolveModelPath(banknoteModelArg, banknoteFallback)
 
-                val useIdentityVerifiers = usesFinalIdentityCurrencyPipeline() && !forceProdBaseline
+                val useIdentityVerifiers = (usesFinalIdentityCurrencyPipeline() || isPhase10) && !forceProdBaseline
                 val isN5Only = context.packageName.endsWith(".identitycandidate_n5") ||
                     context.packageName.endsWith(".visionmission") ||
-                    isSanetraProductionPackage()
+                    isSanetraProductionPackage() ||
+                    isPhase10
                 val isV2 = context.packageName.endsWith(".identitycandidate_v2")
                 val noteVerifierPath = if (useIdentityVerifiers) {
                     when {
@@ -219,6 +231,7 @@ class CurrencyPlatformChannel(
                         banknoteModelPath = banknoteFilePath,
                         numThreads = numThreads,
                         isCandidateMode = enableCandidateMode,
+                        isPhase10CandidateMode = false,
                         noteVerifierPath = noteVerifierPath,
                         coinVerifierPath = coinVerifierPath
                     )
@@ -815,6 +828,8 @@ class CurrencyPlatformChannel(
         "INR_2_COIN" -> 7
         "INR_5_COIN" -> 8
         "INR_10_COIN" -> 9
+        "INVALID" -> -1
+        "UNRECOGNISED" -> -2
         else -> 6
     }
 
@@ -825,6 +840,8 @@ class CurrencyPlatformChannel(
         "INR_100" -> 3
         "INR_200" -> 4
         "INR_500" -> 5
+        "INVALID" -> -1
+        "UNRECOGNISED" -> -2
         else -> 0
     }
 

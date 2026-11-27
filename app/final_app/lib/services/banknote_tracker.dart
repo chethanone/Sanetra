@@ -74,11 +74,6 @@ class TrackedBanknote {
       _classEvidence[top2ClassId] =
           (_classEvidence[top2ClassId] ?? 0.0) + top2Confidence * 0.25;
     }
-    if (suppressedConflictClassId >= 0 && suppressedConflictConfidence >= 0.25) {
-      _classEvidence[suppressedConflictClassId] =
-          (_classEvidence[suppressedConflictClassId] ?? 0.0) +
-              suppressedConflictConfidence * 0.50;
-    }
   }
 
   bool get isCoin => type == 'coin' || denomination.contains('COIN') || classId >= 6;
@@ -209,12 +204,6 @@ class TrackedBanknote {
       if (det.top2ClassId >= 0 && det.top2Confidence >= 0.20) {
         _classEvidence[det.top2ClassId] =
             (_classEvidence[det.top2ClassId] ?? 0.0) + det.top2Confidence * 0.25;
-      }
-      if (det.suppressedConflictClassId >= 0 &&
-          det.suppressedConflictConfidence >= 0.25) {
-        _classEvidence[det.suppressedConflictClassId] =
-            (_classEvidence[det.suppressedConflictClassId] ?? 0.0) +
-                det.suppressedConflictConfidence * 0.50;
       }
 
       int bestClass = det.classId;
@@ -422,6 +411,7 @@ class BanknoteTracker {
     List<CurrencyDetection> detections, {
     int imageWidth = 0,
     int imageHeight = 0,
+    Set<String> extraReasons = const {},
   }) {
     if (!candidateMode) {
       return _updateLegacy(detections);
@@ -430,6 +420,7 @@ class BanknoteTracker {
       detections,
       imageWidth: imageWidth,
       imageHeight: imageHeight,
+      extraReasons: extraReasons,
     );
   }
 
@@ -518,23 +509,54 @@ class BanknoteTracker {
     List<CurrencyDetection> detections, {
     int imageWidth = 0,
     int imageHeight = 0,
+    Set<String> extraReasons = const {},
   }) {
-    // Preserve raw frame pairwise overlap metrics BEFORE EMA smoothing so motion lag cannot mask overlap conflicts
+    if (detections.isEmpty) {
+      for (final track in _tracks) {
+        track.markMissing(candidateMode: true);
+      }
+      final int droppedStaleCount =
+          _tracks.where((t) => !t.shouldRetainCandidate).length;
+      _tracks.removeWhere((t) => !t.shouldRetainCandidate);
+      _incompleteSceneCooldown = 0;
+      _stableMultiBaselineCount = 0;
+      _multiObjectStreak = 0;
+      _cooldownTargetCount = 0;
+      final assessment = CurrencySafetyEvaluator.evaluate(
+        const [],
+        candidateMode: true,
+        extraReasons: extraReasons,
+        imageWidth: imageWidth,
+        imageHeight: imageHeight,
+      );
+      return TrackerUpdateResult(
+        activeDetections: const [],
+        assessment: assessment,
+        activeTrackCount: 0,
+        retainedMissingCount: _tracks.length,
+        droppedStaleCount: droppedStaleCount,
+        deduplicatedTrackCount: 0,
+      );
+    }
+
+    // Preserve raw frame pairwise overlap metrics BEFORE EMA smoothing so motion lag cannot mask cross-class overlap conflicts
     final screenedInput = <CurrencyDetection>[];
     for (int i = 0; i < detections.length; i++) {
       final d = detections[i];
-      double maxIoU = d.interBoxMaxIoU;
-      double maxIoMin = d.interBoxMaxIoMin;
+      double maxCrossClassIoU = d.interBoxMaxIoU;
+      double maxCrossClassIoMin = d.interBoxMaxIoMin;
       for (int j = 0; j < detections.length; j++) {
         if (i == j || detections[j].isCoin != d.isCoin) continue;
-        final iou = CurrencySafetyEvaluator.computeIoU(d, detections[j]);
-        final iomin = CurrencySafetyEvaluator.computeIoMin(d, detections[j]);
-        if (iou > maxIoU) maxIoU = iou;
-        if (iomin > maxIoMin) maxIoMin = iomin;
+        if (detections[j].classId != d.classId) {
+          final iou = CurrencySafetyEvaluator.computeIoU(d, detections[j]);
+          final iomin = CurrencySafetyEvaluator.computeIoMin(d, detections[j]);
+          if (iou > maxCrossClassIoU) maxCrossClassIoU = iou;
+          if (iomin > maxCrossClassIoMin) maxCrossClassIoMin = iomin;
+        }
       }
       screenedInput.add(
-        (maxIoU > d.interBoxMaxIoU || maxIoMin > d.interBoxMaxIoMin)
-            ? d.copyWith(interBoxMaxIoU: maxIoU, interBoxMaxIoMin: maxIoMin)
+        (maxCrossClassIoU > d.interBoxMaxIoU || maxCrossClassIoMin > d.interBoxMaxIoMin)
+            ? d.copyWith(interBoxMaxIoU: maxCrossClassIoU, interBoxMaxIoMin: maxCrossClassIoMin)
             : d,
       );
     }
@@ -639,9 +661,9 @@ class BanknoteTracker {
       ..sort((a, b) => b.confidence.compareTo(a.confidence));
 
     final int retainedMissingCount = _tracks.where((t) => t.framesMissing > 0).length;
-    final extraReasons = <String>{};
+    final combinedExtraReasons = <String>{...extraReasons};
     if (activeDetections.any((d) => d.uncertaintyReasons.contains('MERGED_BOX_SUSPECTED'))) {
-      extraReasons.add('MERGED_BOX_SUSPECTED');
+      combinedExtraReasons.add('MERGED_BOX_SUSPECTED');
     }
 
     if (activeDetections.isEmpty) {
@@ -681,7 +703,7 @@ class BanknoteTracker {
       }
 
       if (_incompleteSceneCooldown > 0) {
-        extraReasons.add('INCOMPLETE_SCENE');
+        combinedExtraReasons.add('INCOMPLETE_SCENE');
       }
     }
 
@@ -690,8 +712,8 @@ class BanknoteTracker {
       candidateMode: true,
       hasUncertainObjectCount:
           activeDetections.any((d) => d.uncertaintyReasons.contains('MERGED_BOX_SUSPECTED')) ||
-              extraReasons.contains('INCOMPLETE_SCENE'),
-      extraReasons: extraReasons,
+              combinedExtraReasons.contains('INCOMPLETE_SCENE'),
+      extraReasons: combinedExtraReasons,
       imageWidth: imageWidth,
       imageHeight: imageHeight,
     );
@@ -722,10 +744,23 @@ class BanknoteTracker {
         final iou = _trackIoU(keep, other);
         final iomin = _trackIoMin(keep, other);
 
-        // Co-located same-type track -> suppress duplicate track instead of double-counting cash
-        if (iou > 0.35 || iomin > 0.70) {
+        // Center-distance aware track deduplication: separate overlapping physical items from duplicate tracks
+        final dx = (keep.centerX - other.centerX).abs();
+        final dy = (keep.centerY - other.centerY).abs();
+        final encW = math.max(keep.x2, other.x2) - math.min(keep.x1, other.x1);
+        final encH = math.max(keep.y2, other.y2) - math.min(keep.y1, other.y1);
+        final cDiag = math.sqrt(encW * encW + encH * encH);
+        final normCenterDist = cDiag > 0.0 ? math.sqrt(dx * dx + dy * dy) / cDiag : 0.0;
+
+        final bool shouldSuppress = (keep.isCoin)
+            ? (normCenterDist < 0.22 && (iou > 0.55 || iomin > 0.78))
+            : (normCenterDist < 0.18 && (iou > 0.65 || iomin > 0.82));
+
+        if (shouldSuppress) {
           toRemove.add(other);
-          if (other.classId != keep.classId && other.confidence >= 0.25) {
+          if (other.classId != keep.classId &&
+              other.confidence >= 0.35 &&
+              (keep.confidence - other.confidence < 0.18)) {
             keep.suppressedConflictCount += 1;
             if (other.confidence > keep.suppressedConflictConfidence) {
               keep.suppressedConflictConfidence = other.confidence;

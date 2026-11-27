@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vision_assistant/services/banknote_tracker.dart';
 import 'package:vision_assistant/services/currency_model_service.dart';
 import 'package:vision_assistant/services/currency_safety_evaluator.dart';
+import 'package:vision_assistant/services/currency_speech_formatter.dart';
 
 CurrencyDetection makeDet({
   required int classId,
@@ -442,6 +443,193 @@ void main() {
         'conflict_suppressed': conflictAlt.spokenMessage,
         'overlap_pair': overlapPair.spokenMessage,
       };
+    });
+
+    test('8. Same-denomination currencies held together (500, 200, 100, coins) confirm full total without false overlap conflict', () {
+      final candTracker = BanknoteTracker(candidateMode: true);
+
+      // A) Two ₹500 notes held together in hand (frontside & backside, ~45% overlap)
+      final pair500 = [
+        makeDet(
+          classId: 5,
+          denom: 'INR_500',
+          value: 500,
+          conf: 0.88,
+          box: [100, 100, 340, 220],
+        ),
+        makeDet(
+          classId: 5,
+          denom: 'INR_500',
+          value: 500,
+          conf: 0.85,
+          box: [200, 110, 440, 230],
+        ),
+      ];
+
+      final res500 = candTracker.updateWithSafety(pair500);
+      expect(res500.activeDetections.length, 2);
+      expect(res500.assessment.isTotalConfirmed, isTrue);
+      expect(res500.assessment.confirmedTotalRupees, 1000);
+      expect(res500.assessment.spokenMessage, contains('2 500 Rupee Notes'));
+      expect(res500.assessment.spokenMessage, contains('1000 Rupees'));
+      expect(res500.assessment.reasons, isNot(contains('OVERLAP_CONFLICT')));
+
+      // B) Two ₹200 notes held together in hand (~45% overlap)
+      candTracker.reset();
+      final pair200 = [
+        makeDet(
+          classId: 4,
+          denom: 'INR_200',
+          value: 200,
+          conf: 0.86,
+          box: [100, 100, 340, 220],
+        ),
+        makeDet(
+          classId: 4,
+          denom: 'INR_200',
+          value: 200,
+          conf: 0.84,
+          box: [200, 110, 440, 230],
+        ),
+      ];
+      final res200 = candTracker.updateWithSafety(pair200);
+      expect(res200.activeDetections.length, 2);
+      expect(res200.assessment.isTotalConfirmed, isTrue);
+      expect(res200.assessment.confirmedTotalRupees, 400);
+      expect(res200.assessment.spokenMessage, contains('2 200 Rupee Notes'));
+      expect(res200.assessment.spokenMessage, contains('400 Rupees'));
+
+      // C) Direct safety evaluation of two overlapping ₹100 notes
+      final direct100 = CurrencySafetyEvaluator.evaluate([
+        makeDet(
+          classId: 3,
+          denom: 'INR_100',
+          value: 100,
+          conf: 0.82,
+          box: [50, 50, 290, 170],
+        ),
+        makeDet(
+          classId: 3,
+          denom: 'INR_100',
+          value: 100,
+          conf: 0.80,
+          box: [150, 60, 390, 180],
+        ),
+      ], candidateMode: true);
+      expect(direct100.isTotalConfirmed, isTrue);
+      expect(direct100.confirmedTotalRupees, 200);
+      expect(direct100.spokenMessage, contains('2 100 Rupee Notes'));
+      expect(direct100.reasons, isNot(contains('OVERLAP_CONFLICT')));
+    });
+
+    test('9. Invalid non-matching currency announces "Invalid" in English, Hindi, and Kannada', () {
+      final candTracker = BanknoteTracker(candidateMode: true);
+
+      // When an object is verified not to match any Indian currency (foreign or fake note)
+      final invalidResult = candTracker.updateWithSafety(
+        const [],
+        extraReasons: {'INVALID_CURRENCY_DETECTED'},
+      );
+
+      expect(invalidResult.assessment.isTotalConfirmed, isFalse);
+      expect(invalidResult.assessment.confirmedTotalRupees, isNull);
+      expect(invalidResult.assessment.reasons, contains('INVALID_CURRENCY_DETECTED'));
+
+      // 1. English
+      final speechEn = CurrencySpeechFormatter.formatAssessment(
+        invalidResult.assessment,
+        language: 'en-IN',
+      );
+      expect(speechEn, 'Invalid');
+
+      // 2. Hindi
+      final speechHi = CurrencySpeechFormatter.formatAssessment(
+        invalidResult.assessment,
+        language: 'hi-IN',
+      );
+      expect(speechHi, 'अमान्य');
+
+      // 3. Kannada
+      final speechKn = CurrencySpeechFormatter.formatAssessment(
+        invalidResult.assessment,
+        language: 'kn-IN',
+      );
+      expect(speechKn, 'ಅಮಾನ್ಯ');
+    });
+
+    test('10. Unrecognised note stays UNRECOGNISED (announces unrecognised currency, NEVER foreign or invalid)', () {
+      final candTracker = BanknoteTracker(candidateMode: true);
+
+      // When a note is unrecognised / uncertain, verifier sets UNRECOGNISED_CURRENCY / IDENTITY_UNKNOWN
+      final unrecResult = candTracker.updateWithSafety(
+        const [],
+        extraReasons: {'UNRECOGNISED_CURRENCY', 'IDENTITY_UNKNOWN'},
+      );
+
+      expect(unrecResult.assessment.isTotalConfirmed, isFalse);
+      expect(unrecResult.assessment.confirmedTotalRupees, isNull);
+      expect(unrecResult.assessment.reasons, contains('UNRECOGNISED_CURRENCY'));
+      expect(unrecResult.assessment.reasons, isNot(contains('INVALID_CURRENCY_DETECTED')));
+
+      // 1. English: Says unrecognised currency, NEVER mentions foreign or invalid
+      final speechEn = CurrencySpeechFormatter.formatAssessment(
+        unrecResult.assessment,
+        language: 'en-IN',
+      );
+      expect(speechEn, 'Unrecognised currency. Hold steady and try again.');
+      expect(speechEn.toLowerCase(), isNot(contains('foreign')));
+      expect(speechEn.toLowerCase(), isNot(contains('invalid')));
+
+      // 2. Hindi: Says unrecognised, does not mention foreign or invalid
+      final speechHi = CurrencySpeechFormatter.formatAssessment(
+        unrecResult.assessment,
+        language: 'hi-IN',
+      );
+      expect(speechHi, 'अपरिचित मुद्रा। स्थिर रखें और फिर प्रयास करें।');
+      expect(speechHi, isNot(contains('विदेशी')));
+      expect(speechHi, isNot(contains('अमान्य')));
+
+      // 3. Kannada: Says unrecognised, does not mention foreign or invalid
+      final speechKn = CurrencySpeechFormatter.formatAssessment(
+        unrecResult.assessment,
+        language: 'kn-IN',
+      );
+      expect(speechKn, 'ಗುರುತಿಸಲಾಗದ ಕರೆನ್ಸಿ. ದಯವಿಟ್ಟು ಸ್ಥಿರವಾಗಿ ಹಿಡಿದು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.');
+      expect(speechKn, isNot(contains('ವಿದೇಶಿ')));
+      expect(speechKn, isNot(contains('ಅಮಾನ್ಯ')));
+    });
+
+    test('11. Banknote overlay painter correctly distinguishes INVALID vs UNRECOGNISED', () {
+      const invalidDet = CurrencyDetection(
+        classId: -1,
+        denomination: 'INVALID',
+        value: 0,
+        confidence: 0.88,
+        x1: 50,
+        y1: 50,
+        x2: 250,
+        y2: 450,
+        confirmationState: DetectionConfirmationState.conflicting,
+        uncertaintyReasons: ['INVALID_CURRENCY_DETECTED'],
+      );
+
+      const unrecDet = CurrencyDetection(
+        classId: -2,
+        denomination: 'UNRECOGNISED',
+        value: 0,
+        confidence: 0.45,
+        x1: 60,
+        y1: 60,
+        x2: 260,
+        y2: 460,
+        confirmationState: DetectionConfirmationState.tentative,
+        uncertaintyReasons: ['UNRECOGNISED_CURRENCY'],
+      );
+
+      expect(invalidDet.denomination, 'INVALID');
+      expect(invalidDet.uncertaintyReasons, contains('INVALID_CURRENCY_DETECTED'));
+      expect(unrecDet.denomination, 'UNRECOGNISED');
+      expect(unrecDet.uncertaintyReasons, contains('UNRECOGNISED_CURRENCY'));
     });
   });
 }

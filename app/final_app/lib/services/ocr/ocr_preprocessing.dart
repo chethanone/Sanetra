@@ -237,5 +237,213 @@ class OcrPreprocessing {
       targetHeight: arjunaRecHeight,
     );
   }
+
+  /// Enhances handwriting strokes by dynamic local contrast stretching,
+  /// background leveling, and edge sharpening to rescue faint ballpoint, pencil,
+  /// or colored ink strokes.
+  static img.Image enhanceCropForHandwriting(img.Image crop) {
+    if (crop.width < 6 || crop.height < 6) return crop;
+
+    final w = crop.width;
+    final h = crop.height;
+    final lumas = <double>[];
+    for (int y = 0; y < h; y++) {
+      for (int x = 0; x < w; x++) {
+        final p = crop.getPixel(x, y);
+        lumas.add(0.299 * p.r + 0.587 * p.g + 0.114 * p.b);
+      }
+    }
+    lumas.sort();
+
+    // In thin handwriting, strokes occupy ~1% to 10% of pixels.
+    // Use the 1st percentile as ink floor and 95th percentile as paper background ceiling.
+    final double inkFloor = lumas[(lumas.length * 0.01).floor()];
+    final double bgCeiling = lumas[(lumas.length * 0.95).floor()];
+    final double range = math.max(15.0, bgCeiling - inkFloor);
+
+    final enhanced = img.Image(width: w, height: h, numChannels: 3);
+    for (int y = 0; y < h; y++) {
+      for (int x = 0; x < w; x++) {
+        final p = crop.getPixel(x, y);
+        final luma = 0.299 * p.r + 0.587 * p.g + 0.114 * p.b;
+        final normLuma = ((luma - inkFloor) / range).clamp(0.0, 1.0);
+        // Gamma stretch to deepen ink valleys while leaving paper bright white
+        final targetLuma = math.pow(normLuma, 1.25) * 255.0;
+        final factor = luma > 0.0 ? targetLuma / luma : 1.0;
+        final r = (p.r * factor).round().clamp(0, 255);
+        final g = (p.g * factor).round().clamp(0, 255);
+        final b = (p.b * factor).round().clamp(0, 255);
+        enhanced.setPixelRgb(x, y, r, g, b);
+      }
+    }
+    return enhanced;
+  }
+
+  /// Enhances Kannada handwriting strokes by tile-based adaptive local contrast
+  /// stretching and morphological stroke reinforcement (min-filtering thin strokes)
+  /// without applying destructive de-slanting to circular Kannada glyphs.
+  static img.Image enhanceCropForKannadaHandwriting(img.Image crop) {
+    if (crop.width < 8 || crop.height < 8) return crop;
+
+    final w = crop.width;
+    final h = crop.height;
+
+    // 1. Tile-based local contrast stretching to normalize shadow gradients across the line
+    final int tileSize = math.max(16, math.min(64, (w / 4).round()));
+    final numTiles = (w / tileSize).ceil();
+    final enhanced = img.Image(width: w, height: h, numChannels: 3);
+
+    for (int t = 0; t < numTiles; t++) {
+      final xStart = t * tileSize;
+      final xEnd = math.min(w, (t + 1) * tileSize);
+      final tileLumas = <double>[];
+
+      for (int y = 0; y < h; y++) {
+        for (int x = xStart; x < xEnd; x++) {
+          final p = crop.getPixel(x, y);
+          tileLumas.add(0.299 * p.r + 0.587 * p.g + 0.114 * p.b);
+        }
+      }
+      if (tileLumas.isEmpty) continue;
+      tileLumas.sort();
+
+      // In thin handwriting, ink occupies 1% to 15% of pixels
+      final double inkFloor = tileLumas[(tileLumas.length * 0.02).floor()];
+      final double bgCeiling = tileLumas[(tileLumas.length * 0.93).floor()];
+      final double rawDiff = bgCeiling - inkFloor;
+
+      if (rawDiff < 14.0) {
+        // Tile is pure paper background without ink strokes: keep bright white
+        for (int y = 0; y < h; y++) {
+          for (int x = xStart; x < xEnd; x++) {
+            enhanced.setPixelRgb(x, y, 255, 255, 255);
+          }
+        }
+        continue;
+      }
+
+      final double range = math.max(18.0, rawDiff);
+
+      for (int y = 0; y < h; y++) {
+        for (int x = xStart; x < xEnd; x++) {
+          final p = crop.getPixel(x, y);
+          final luma = 0.299 * p.r + 0.587 * p.g + 0.114 * p.b;
+          final normLuma = ((luma - inkFloor) / range).clamp(0.0, 1.0);
+          // Gamma curve emphasizing faint pencil/ballpoint strokes
+          final targetLuma = math.pow(normLuma, 1.35) * 255.0;
+          final factor = luma > 0.0 ? targetLuma / luma : 1.0;
+          final r = (p.r * factor).round().clamp(0, 255);
+          final g = (p.g * factor).round().clamp(0, 255);
+          final b = (p.b * factor).round().clamp(0, 255);
+          enhanced.setPixelRgb(x, y, r, g, b);
+        }
+      }
+    }
+
+    // 2. Morphological stroke reinforcement (3x3 local min-filter on ink edges)
+    // Ensures delicate Talekattu, Kombu, and Ottakshara subscripts stay intact when resized to 32/48px
+    final reinforced = img.Image(width: w, height: h, numChannels: 3);
+    for (int y = 0; y < h; y++) {
+      for (int x = 0; x < w; x++) {
+        final p = enhanced.getPixel(x, y);
+        final luma = 0.299 * p.r + 0.587 * p.g + 0.114 * p.b;
+
+        // If pixel is near ink stroke boundary (luma < 195)
+        if (luma < 195.0) {
+          int minR = p.r.toInt();
+          int minG = p.g.toInt();
+          int minB = p.b.toInt();
+
+          for (int dy = -1; dy <= 1; dy++) {
+            final ny = y + dy;
+            if (ny < 0 || ny >= h) continue;
+            for (int dx = -1; dx <= 1; dx++) {
+              final nx = x + dx;
+              if (nx < 0 || nx >= w) continue;
+              final np = enhanced.getPixel(nx, ny);
+              final nLuma = 0.299 * np.r + 0.587 * np.g + 0.114 * np.b;
+              if (nLuma < luma) {
+                if (np.r < minR) minR = np.r.toInt();
+                if (np.g < minG) minG = np.g.toInt();
+                if (np.b < minB) minB = np.b.toInt();
+              }
+            }
+          }
+          reinforced.setPixelRgb(x, y, minR, minG, minB);
+        } else {
+          reinforced.setPixelRgb(x, y, p.r.round(), p.g.round(), p.b.round());
+        }
+      }
+    }
+
+    return reinforced;
+  }
+
+  /// De-slants cursive / italic handwriting by estimating stroke inclination
+  /// and applying horizontal shear compensation.
+  static img.Image deSlantCrop(img.Image crop, {double maxSlantDegrees = 20.0}) {
+    if (crop.width < 12 || crop.height < 12) return crop;
+    final w = crop.width;
+    final h = crop.height;
+
+    double bestAlpha = 0.0;
+    double maxVar = -1.0;
+
+    for (double deg = -maxSlantDegrees; deg <= maxSlantDegrees; deg += 5.0) {
+      final rad = deg * math.pi / 180.0;
+      final tanA = math.tan(rad);
+      final profile = List<double>.filled(w, 0.0);
+
+      for (int y = 0; y < h; y++) {
+        final shift = ((y - h / 2.0) * tanA).round();
+        for (int x = 0; x < w; x++) {
+          final srcX = x + shift;
+          if (srcX >= 0 && srcX < w) {
+            final p = crop.getPixel(srcX, y);
+            final luma = 255.0 - (0.299 * p.r + 0.587 * p.g + 0.114 * p.b);
+            if (luma > 35) profile[x] += luma;
+          }
+        }
+      }
+
+      final mean = profile.reduce((a, b) => a + b) / w;
+      double variance = 0.0;
+      for (final val in profile) {
+        variance += (val - mean) * (val - mean);
+      }
+      if (variance > maxVar) {
+        maxVar = variance;
+        bestAlpha = rad;
+      }
+    }
+
+    if (bestAlpha.abs() < 0.07) return crop;
+
+    final tanA = math.tan(bestAlpha);
+    final sheared = img.Image(width: w, height: h, numChannels: 3);
+    img.fill(sheared, color: img.ColorRgb8(255, 255, 255));
+
+    for (int y = 0; y < h; y++) {
+      final shift = ((y - h / 2.0) * tanA);
+      for (int x = 0; x < w; x++) {
+        final srcX = x + shift;
+        final x0 = srcX.floor();
+        final x1 = x0 + 1;
+        if (x0 >= 0 && x1 < w) {
+          final fx = srcX - x0;
+          final p0 = crop.getPixel(x0, y);
+          final p1 = crop.getPixel(x1, y);
+          final r = ((1.0 - fx) * p0.r + fx * p1.r).round().clamp(0, 255);
+          final g = ((1.0 - fx) * p0.g + fx * p1.g).round().clamp(0, 255);
+          final b = ((1.0 - fx) * p0.b + fx * p1.b).round().clamp(0, 255);
+          sheared.setPixelRgb(x, y, r, g, b);
+        } else if (x0 >= 0 && x0 < w) {
+          final p0 = crop.getPixel(x0, y);
+          sheared.setPixelRgb(x, y, p0.r.round(), p0.g.round(), p0.b.round());
+        }
+      }
+    }
+    return sheared;
+  }
 }
 

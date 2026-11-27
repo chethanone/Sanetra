@@ -125,18 +125,47 @@ class KannadaNumberNormalizer {
   /// Build natural Kannada speech for a [CurrencySafetyAssessment] without
   /// modifying any underlying currency detection or safety logic.
   static String formatAssessmentKannada(CurrencySafetyAssessment assessment) {
+    final bool isInvalid = assessment.reasons.contains('INVALID_CURRENCY_DETECTED') ||
+        assessment.reasons.contains('FOREIGN_CURRENCY_DETECTED') ||
+        assessment.spokenMessage == 'Invalid' ||
+        assessment.screenedDetections.any((d) => d.denomination == 'INVALID');
+    final bool isUnrecognised = assessment.reasons.contains('UNRECOGNISED_CURRENCY') ||
+        assessment.reasons.contains('IDENTITY_UNKNOWN') ||
+        assessment.spokenMessage.contains('Unrecognised') ||
+        assessment.screenedDetections.any((d) => d.denomination == 'UNRECOGNISED');
+
+    if (isInvalid) {
+      return 'ಅಮಾನ್ಯ';
+    }
+
     switch (assessment.status) {
       case AnnouncementSafetyStatus.empty:
+        if (isUnrecognised) {
+          return 'ಗುರುತಿಸಲಾಗದ ಕರೆನ್ಸಿ. ದಯವಿಟ್ಟು ಸ್ಥಿರವಾಗಿ ಹಿಡಿದು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.';
+        }
         return 'ಹಣ ಕಂಡುಬಂದಿಲ್ಲ. ದಯವಿಟ್ಟು ಹತ್ತಿರ ಹಿಡಿಯಿರಿ.';
       case AnnouncementSafetyStatus.conflictingOrUncertain:
+        if (isUnrecognised) {
+          return 'ಗುರುತಿಸಲಾಗದ ಕರೆನ್ಸಿ. ದಯವಿಟ್ಟು ಸ್ಥಿರವಾಗಿ ಹಿಡಿದು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.';
+        }
+        if (assessment.reasons.contains('TRUNCATED_OR_OCCLUDED_NOTE') ||
+            assessment.reasons.contains('HAND_OCCLUDED_SPLIT_DISAGREEMENT')) {
+          return 'ಮೌಲ್ಯ ಸ್ಪಷ್ಟವಾಗಿಲ್ಲ. ನೋಟು ಮುಚ್ಚಲ್ಪಟ್ಟಿದೆ, ದಯವಿಟ್ಟು ಪೂರ್ತಿ ನೋಟನ್ನು ತೋರಿಸಿ.';
+        }
         if (assessment.reasons.contains('MERGED_BOX_SUSPECTED') ||
             assessment.reasons.contains('UNCERTAIN_COUNT')) {
           return 'ಕೆಲವು ನೋಟುಗಳು ಸ್ಪಷ್ಟವಾಗಿಲ್ಲ ಅಥವಾ ಒಂದರ ಮೇಲೊಂದು ಇವೆ. ದಯವಿಟ್ಟು ಬೇರ್ಪಡಿಸಿ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.';
         }
         return 'ಮೌಲ್ಯ ಸ್ಪಷ್ಟವಾಗಿಲ್ಲ. ದಯವಿಟ್ಟು ಬೆಳಕು ಅಥವಾ ಕೋನವನ್ನು ಸರಿಪಡಿಸಿ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.';
       case AnnouncementSafetyStatus.tentativeSingle:
-        final d = assessment.screenedDetections.first;
-        return 'ಬಹುಶಃ ${formatItemKannada(d.denomination, d.value)}. ದೃಢೀಕರಿಸಲು ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ.';
+        if (isUnrecognised) {
+          return 'ಗುರುತಿಸಲಾಗದ ಕರೆನ್ಸಿ. ದಯವಿಟ್ಟು ಸ್ಥಿರವಾಗಿ ಹಿಡಿದು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.';
+        }
+        if (assessment.reasons.contains('TRUNCATED_OR_OCCLUDED_NOTE') ||
+            assessment.reasons.contains('HAND_OCCLUDED_SPLIT_DISAGREEMENT')) {
+          return 'ಮೌಲ್ಯ ಸ್ಪಷ್ಟವಾಗಿಲ್ಲ. ನೋಟು ಮುಚ್ಚಲ್ಪಟ್ಟಿದೆ, ದಯವಿಟ್ಟು ಪೂರ್ತಿ ನೋಟನ್ನು ತೋರಿಸಿ.';
+        }
+        return 'ಮೌಲ್ಯ ಸ್ಪಷ್ಟವಾಗಿಲ್ಲ. ದಯವಿಟ್ಟು ಹತ್ತಿರ ಮತ್ತು ನೇರವಾಗಿ ಹಿಡಿದು ಪ್ರಯತ್ನಿಸಿ.';
       case AnnouncementSafetyStatus.confirmedSingle:
         final d = assessment.screenedDetections.first;
         return formatItemKannada(d.denomination, d.value);

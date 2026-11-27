@@ -76,7 +76,8 @@ class CurrencySafetyEvaluator {
     int imageHeight = 0,
   }) {
     if (detections.isEmpty) {
-      if (extraReasons.contains('FOREIGN_CURRENCY_DETECTED')) {
+      if (extraReasons.contains('INVALID_CURRENCY_DETECTED') ||
+          extraReasons.contains('FOREIGN_CURRENCY_DETECTED')) {
         return CurrencySafetyAssessment(
           status: AnnouncementSafetyStatus.conflictingOrUncertain,
           screenedDetections: const [],
@@ -88,12 +89,13 @@ class CurrencySafetyEvaluator {
           conflictingCount: 1,
           hasUncertainCount: true,
           reasons: extraReasons,
-          spokenMessage: 'Foreign currency detected, not counted.',
-          bannerHeadline: 'Foreign currency',
-          bannerSubtitle: 'Not Indian Rupees — not counted',
+          spokenMessage: 'Invalid',
+          bannerHeadline: 'Invalid',
+          bannerSubtitle: 'Invalid currency',
         );
       }
-      if (extraReasons.contains('IDENTITY_UNKNOWN')) {
+      if (extraReasons.contains('UNRECOGNISED_CURRENCY') ||
+          extraReasons.contains('IDENTITY_UNKNOWN')) {
         return CurrencySafetyAssessment(
           status: AnnouncementSafetyStatus.conflictingOrUncertain,
           screenedDetections: const [],
@@ -105,9 +107,9 @@ class CurrencySafetyEvaluator {
           conflictingCount: 0,
           hasUncertainCount: true,
           reasons: extraReasons,
-          spokenMessage: 'Currency uncertain, hold steady and try again.',
-          bannerHeadline: 'Currency uncertain',
-          bannerSubtitle: 'Hold steady — cannot verify Indian currency',
+          spokenMessage: 'Unrecognised currency. Hold steady and try again.',
+          bannerHeadline: 'Unrecognised',
+          bannerSubtitle: 'Unrecognised · Hold steady',
         );
       }
       return const CurrencySafetyAssessment(
@@ -162,10 +164,11 @@ class CurrencySafetyEvaluator {
 
     for (int i = 0; i < detections.length; i++) {
       final d = detections[i];
-      double maxIoU = d.interBoxMaxIoU;
-      double maxIoMin = d.interBoxMaxIoMin;
+      double maxCrossClassIoU = d.interBoxMaxIoU;
+      double maxCrossClassIoMin = d.interBoxMaxIoMin;
       double maxCrossModelBanknoteIoMin = 0.0;
       double maxEnclosingNoteAreaFrac = 0.0;
+      bool hasTrueOverlapConflict = false;
 
       // Pairwise inter-box overlap among same-type items (note vs note, coin vs coin)
       // plus cross-model banknote containment checks for coins.
@@ -175,8 +178,23 @@ class CurrencySafetyEvaluator {
         if (other.isCoin == d.isCoin) {
           final iou = computeIoU(d, other);
           final iomin = computeIoMin(d, other);
-          if (iou > maxIoU) maxIoU = iou;
-          if (iomin > maxIoMin) maxIoMin = iomin;
+
+          final dDiag = math.sqrt(d.width * d.width + d.height * d.height);
+          final oDiag = math.sqrt(other.width * other.width + other.height * other.height);
+          final minDiag = math.min(dDiag, oDiag);
+          final dx = d.centerX - other.centerX;
+          final dy = d.centerY - other.centerY;
+          final normCenterDist = minDiag > 0.0 ? math.sqrt(dx * dx + dy * dy) / minDiag : 1.0;
+          final isCoLocated = normCenterDist < 0.20 && (iou >= 0.60 || iomin >= 0.80);
+
+          // Only cross-class pairs can trigger overlap conflict; same denomination held together is valid
+          if (d.classId != other.classId) {
+            if (iou > maxCrossClassIoU) maxCrossClassIoU = iou;
+            if (iomin > maxCrossClassIoMin) maxCrossClassIoMin = iomin;
+            if (isCoLocated) {
+              hasTrueOverlapConflict = true;
+            }
+          }
         } else if (d.isCoin &&
             !other.isCoin &&
             other.confidence >= CurrencyModelService.candidateConfirmConfThreshold &&
@@ -198,11 +216,19 @@ class CurrencySafetyEvaluator {
       final reasons = <String>{...d.uncertaintyReasons};
 
       final bool hasMissingStale = d.framesMissing > 0;
-      final bool hasOverlap =
-          maxIoU > CurrencyModelService.candidateMaxInterBoxIoU ||
-              maxIoMin > CurrencyModelService.candidateMaxInterBoxIoMin;
+      final bool hasOverlap = hasTrueOverlapConflict ||
+          maxCrossClassIoU > CurrencyModelService.candidateMaxInterBoxIoU ||
+          maxCrossClassIoMin > CurrencyModelService.candidateMaxInterBoxIoMin;
+      final bool isSuppressed25Conflict = ((d.denomination == 'INR_2_COIN' && d.suppressedConflictClassName == 'INR_5_COIN') ||
+          (d.denomination == 'INR_5_COIN' && d.suppressedConflictClassName == 'INR_2_COIN')) &&
+          (d.confidence >= 0.88 && d.classMargin >= 0.50);
+      final bool isSuppressed12Conflict = ((d.denomination == 'INR_1_COIN' && d.suppressedConflictClassName == 'INR_2_COIN') ||
+          (d.denomination == 'INR_2_COIN' && d.suppressedConflictClassName == 'INR_1_COIN')) &&
+          (d.confidence >= 0.45 && d.classMargin >= 0.12);
       final bool hasSuppressedConflict =
-          d.suppressedConflictConfidence >= CurrencyModelService.candidateMaxSuppressedConflict;
+          d.suppressedConflictConfidence >= CurrencyModelService.candidateMaxSuppressedConflict &&
+          !isSuppressed25Conflict &&
+          !isSuppressed12Conflict;
 
       final double areaFrac = frameArea > 0.0 ? d.area / frameArea : 1.0;
       final double coinAspect = (d.isCoin && d.width > 0.0 && d.height > 0.0)
@@ -287,16 +313,22 @@ class CurrencySafetyEvaluator {
       allReasons.addAll(reasons);
       screened.add(
         d.copyWith(
-          interBoxMaxIoU: maxIoU,
-          interBoxMaxIoMin: maxIoMin,
+          interBoxMaxIoU: maxCrossClassIoU,
+          interBoxMaxIoMin: maxCrossClassIoMin,
           confirmationState: state,
           uncertaintyReasons: reasons.toList(),
         ),
       );
     }
 
-    final bool hasIdentityBlock = allReasons.contains('FOREIGN_CURRENCY_DETECTED') ||
-        allReasons.contains('IDENTITY_UNKNOWN');
+    final bool hasInvalidCurrency = allReasons.contains('INVALID_CURRENCY_DETECTED') ||
+        allReasons.contains('FOREIGN_CURRENCY_DETECTED') ||
+        screened.any((d) => d.denomination == 'INVALID' || d.uncertaintyReasons.contains('INVALID_CURRENCY_DETECTED'));
+    final bool hasUnrecognisedCurrency = allReasons.contains('UNRECOGNISED_CURRENCY') ||
+        allReasons.contains('IDENTITY_UNKNOWN') ||
+        screened.any((d) => d.denomination == 'UNRECOGNISED' || d.uncertaintyReasons.contains('UNRECOGNISED_CURRENCY'));
+
+    final bool hasIdentityBlock = hasInvalidCurrency || hasUnrecognisedCurrency;
     final bool uncertainCount = hasUncertainObjectCount ||
         overlapHazard ||
         hasIdentityBlock ||
@@ -308,88 +340,160 @@ class CurrencySafetyEvaluator {
     }
 
     final int visibleSum = screened.fold<int>(0, (s, d) => s + d.value);
-    final bool allConfirmed =
-        conflictingCount == 0 && tentativeCount == 0 && !uncertainCount;
 
-    if (allConfirmed) {
-      final status = screened.length == 1
-          ? AnnouncementSafetyStatus.confirmedSingle
-          : AnnouncementSafetyStatus.confirmedMultiple;
-      return CurrencySafetyAssessment(
-        status: status,
-        screenedDetections: screened,
-        isTotalConfirmed: true,
-        confirmedTotalRupees: visibleSum,
-        visibleDetectedSumRupees: visibleSum,
-        confirmedCount: confirmedCount,
-        tentativeCount: 0,
-        conflictingCount: 0,
-        hasUncertainCount: false,
-        reasons: allReasons,
-        spokenMessage: _buildConfirmedSpeech(screened, visibleSum, includeConfirmedPrefix: true),
-        bannerHeadline: _buildBreakdownHeadline(screened),
-        bannerSubtitle: 'CONFIRMED · ${screened.length} item${screened.length == 1 ? '' : 's'}',
-      );
+    final confirmed = screened.where((d) => d.confirmationState == DetectionConfirmationState.confirmed).toList();
+    final tentative = screened.where((d) => d.confirmationState == DetectionConfirmationState.tentative).toList();
+    final conflicting = screened.where((d) => d.confirmationState == DetectionConfirmationState.conflicting).toList();
+
+    // 1. SAFETY GATE: Active conflict, oscillation, or hand-occluded disagreement MUST trigger assistive guidance!
+    final bool hasConflict = conflicting.isNotEmpty ||
+        conflictingCount > 0 ||
+        hasInvalidCurrency ||
+        allReasons.contains('INCOMPLETE_SCENE') ||
+        allReasons.contains('OVERLAP_CONFLICT') ||
+        allReasons.contains('CROSS_CLASS_CONFLICT') ||
+        allReasons.contains('CLASS_OSCILLATION') ||
+        allReasons.contains('HAND_OCCLUDED_SPLIT_DISAGREEMENT');
+
+    final String conflictGuidance;
+    final String conflictSubtitle;
+    final String conflictHeadline;
+    if (hasInvalidCurrency) {
+      conflictGuidance = 'Invalid';
+      conflictHeadline = 'Invalid';
+      conflictSubtitle = 'INVALID · Not valid currency';
+    } else if (hasUnrecognisedCurrency && confirmed.isEmpty) {
+      conflictGuidance = 'Unrecognised currency. Hold steady and try again.';
+      conflictHeadline = 'Unrecognised';
+      conflictSubtitle = 'UNRECOGNISED · Hold steady';
+    } else if (allReasons.contains('INCOMPLETE_SCENE')) {
+      conflictGuidance =
+          'Some currency items are temporarily unclear. Please hold steady in better light and try again.';
+      conflictHeadline = 'Incomplete scene';
+      conflictSubtitle = 'INCOMPLETE SCENE · Waiting for steady view';
+    } else if (allReasons.contains('TRUNCATED_OR_OCCLUDED_NOTE') ||
+        allReasons.contains('HAND_OCCLUDED_SPLIT_DISAGREEMENT')) {
+      conflictGuidance =
+          'Difficult to denominate. Currency is partially covered, please uncover the note.';
+      conflictHeadline = 'Difficult to denominate';
+      conflictSubtitle = 'NOTE COVERED · Uncover to verify';
+    } else if (allReasons.contains('MERGED_BOX_SUSPECTED') ||
+        allReasons.contains('UNCERTAIN_COUNT') ||
+        overlapHazard) {
+      conflictGuidance =
+          'Difficult to denominate. Multiple currencies may be overlapping, please spread them apart to verify count.';
+      conflictHeadline = 'Difficult to denominate';
+      conflictSubtitle = 'UNCERTAIN COUNT · Spread stacked notes';
+    } else {
+      conflictGuidance =
+          'Difficult to denominate. Please adjust lighting or angle and try again.';
+      conflictHeadline = 'Difficult to denominate';
+      conflictSubtitle = 'CONFLICT DETECTED · Hold steady';
     }
 
-    // Tentative single note without conflict or ambiguous count -> recognize tentatively without confirming total
-    if (screened.length == 1 && conflictingCount == 0 && !uncertainCount) {
-      final d = screened.first;
-      final spokenUnit = CurrencyModelService.formatItemSpokenName(d.denomination, d.value);
-      final displayUnit = CurrencyModelService.formatItemDisplayName(d.denomination, d.value);
+    if (hasConflict) {
       return CurrencySafetyAssessment(
-        status: AnnouncementSafetyStatus.tentativeSingle,
+        status: AnnouncementSafetyStatus.conflictingOrUncertain,
         screenedDetections: screened,
         isTotalConfirmed: false,
         confirmedTotalRupees: null,
         visibleDetectedSumRupees: visibleSum,
-        confirmedCount: confirmedCount,
-        tentativeCount: tentativeCount,
-        conflictingCount: 0,
-        hasUncertainCount: false,
+        confirmedCount: 0,
+        tentativeCount: tentative.length,
+        conflictingCount: conflicting.isNotEmpty ? conflicting.length : (conflictingCount > 0 ? conflictingCount : 1),
+        hasUncertainCount: true,
         reasons: allReasons,
-        spokenMessage:
-            'Possible $spokenUnit, not confirmed. Hold steady in better light and try again.',
-        bannerHeadline: 'Possible $displayUnit',
-        bannerSubtitle: 'TENTATIVE · Low certainty — total not confirmed',
+        spokenMessage: conflictGuidance,
+        bannerHeadline: conflictHeadline,
+        bannerSubtitle: conflictSubtitle,
       );
     }
 
-    // Multiple / Conflicting / Uncertain count -> DO NOT announce sum as confirmed total
-    final String spokenGuidance;
-    final String subtitle;
-    if (allReasons.contains('INCOMPLETE_SCENE')) {
-      spokenGuidance =
-          'Some currency items are temporarily unclear. Please hold steady in better light and try again.';
-      subtitle = 'INCOMPLETE SCENE · Waiting for steady view';
-    } else if (overlapHazard || uncertainCount) {
-      spokenGuidance =
-          'Some notes are unclear or overlapping. Please spread them apart and try again.';
-      subtitle = 'UNCERTAIN COUNT · Spread stacked or overlapping notes';
-    } else if (classConflictHazard) {
-      spokenGuidance =
-          'Denomination conflict detected. Please adjust lighting or angle and try again.';
-      subtitle = 'CONFLICT DETECTED · Total withheld';
-    } else {
-      spokenGuidance =
-          'Some notes are unclear. Please spread them apart in better light and try again.';
-      subtitle = 'PARTIAL / UNCONFIRMED · Hold steady';
+    // 2. SAFETY GATE: Confirmed items announce their denomination immediately!
+    if (confirmed.isNotEmpty) {
+      final int confirmedSum = confirmed.fold<int>(0, (s, d) => s + d.value);
+      final status = confirmed.length == 1
+          ? AnnouncementSafetyStatus.confirmedSingle
+          : AnnouncementSafetyStatus.confirmedMultiple;
+      final bool totalConfirmed = tentative.isEmpty && conflicting.isEmpty;
+      return CurrencySafetyAssessment(
+        status: status,
+        screenedDetections: screened,
+        isTotalConfirmed: totalConfirmed,
+        confirmedTotalRupees: totalConfirmed ? confirmedSum : null,
+        visibleDetectedSumRupees: visibleSum,
+        confirmedCount: confirmed.length,
+        tentativeCount: tentative.length,
+        conflictingCount: 0,
+        hasUncertainCount: !totalConfirmed,
+        reasons: allReasons,
+        spokenMessage: _buildConfirmedSpeech(confirmed, confirmedSum, includeConfirmedPrefix: candidateMode),
+        bannerHeadline: _buildBreakdownHeadline(confirmed),
+        bannerSubtitle: 'RECOGNIZED · ${confirmed.length} item${confirmed.length == 1 ? '' : 's'}',
+      );
+    }
+
+    if (tentative.isNotEmpty) {
+      final String tentativeSpeech;
+      final bool isCovered = allReasons.contains('TRUNCATED_OR_OCCLUDED_NOTE') ||
+          allReasons.contains('HAND_OCCLUDED_SPLIT_DISAGREEMENT');
+      if (isCovered) {
+        tentativeSpeech =
+            'Difficult to denominate. Currency is partially covered, please uncover the note.';
+      } else if (allReasons.contains('MERGED_BOX_SUSPECTED')) {
+        tentativeSpeech =
+            'Difficult to denominate. Multiple currencies may be overlapping, please spread them apart to verify count.';
+      } else if (hasUnrecognisedCurrency ||
+          allReasons.contains('IDENTITY_UNKNOWN') ||
+          allReasons.contains('UNRECOGNISED_CURRENCY')) {
+        tentativeSpeech =
+            'Unrecognised currency. Hold steady and try again.';
+      } else if (tentative.length == 1) {
+        final d = tentative.first;
+        final spokenUnit =
+            CurrencyModelService.formatItemSpokenName(d.denomination, d.value);
+        tentativeSpeech =
+            'Difficult to denominate. Possible $spokenUnit, not confirmed. Hold steady in better light and try again.';
+      } else {
+        tentativeSpeech =
+            'Difficult to denominate. Hold steady in better light and try again.';
+      }
+
+      return CurrencySafetyAssessment(
+        status: AnnouncementSafetyStatus.tentativeSingle,
+        screenedDetections: tentative,
+        isTotalConfirmed: false,
+        confirmedTotalRupees: null,
+        visibleDetectedSumRupees: visibleSum,
+        confirmedCount: 0,
+        tentativeCount: tentative.length,
+        conflictingCount: 0,
+        hasUncertainCount: false,
+        reasons: allReasons,
+        spokenMessage: tentativeSpeech,
+        bannerHeadline: isCovered
+            ? 'Note partially covered'
+            : 'Difficult to denominate',
+        bannerSubtitle: isCovered
+            ? 'Uncover note to verify denomination'
+            : 'Hold still for confirmation',
+      );
     }
 
     return CurrencySafetyAssessment(
-      status: AnnouncementSafetyStatus.conflictingOrUncertain,
-      screenedDetections: screened,
+      status: AnnouncementSafetyStatus.empty,
+      screenedDetections: const [],
       isTotalConfirmed: false,
       confirmedTotalRupees: null,
-      visibleDetectedSumRupees: visibleSum,
-      confirmedCount: confirmedCount,
-      tentativeCount: tentativeCount,
-      conflictingCount: conflictingCount,
-      hasUncertainCount: uncertainCount,
+      visibleDetectedSumRupees: 0,
+      confirmedCount: 0,
+      tentativeCount: 0,
+      conflictingCount: 0,
+      hasUncertainCount: false,
       reasons: allReasons,
-      spokenMessage: spokenGuidance,
-      bannerHeadline: 'Unclear / Unconfirmed (${screened.length})',
-      bannerSubtitle: subtitle,
+      spokenMessage: '',
+      bannerHeadline: 'No Currency Visible',
+      bannerSubtitle: 'Align banknote or coin within frame',
     );
   }
 

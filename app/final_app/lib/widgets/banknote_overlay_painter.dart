@@ -71,11 +71,21 @@ class BanknoteOverlayPainter extends CustomPainter {
 
       final rect = Rect.fromLTRB(left, top, right, bottom);
       final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(12));
+
+      final bool isInvalid = detection.denomination == 'INVALID' ||
+          detection.uncertaintyReasons.contains('INVALID_CURRENCY_DETECTED') ||
+          detection.uncertaintyReasons.contains('FOREIGN_CURRENCY_DETECTED');
+      final bool isUnrecognised = detection.denomination == 'UNRECOGNISED' ||
+          detection.uncertaintyReasons.contains('UNRECOGNISED_CURRENCY') ||
+          detection.uncertaintyReasons.contains('IDENTITY_UNKNOWN');
+
       final Color color;
-      if (detection.isConflicting) {
+      if (isInvalid) {
+        color = const Color(0xFFFF1744); // High-visibility Red for Invalid currency
+      } else if (detection.isConflicting) {
         color = const Color(0xFFFF5252);
-      } else if (detection.isTentative) {
-        color = const Color(0xFFFFD54F);
+      } else if (isUnrecognised || detection.isTentative) {
+        color = const Color(0xFFFFD54F); // Amber / Yellow for Unrecognised notes
       } else {
         color = getColorForValue(detection.value, denomination: detection.denomination);
       }
@@ -127,11 +137,19 @@ class BanknoteOverlayPainter extends CustomPainter {
       canvas.drawLine(Offset(rect.right, rect.bottom), Offset(rect.right, rect.bottom - bracketLen), bracketPaint);
 
       // 5. Floating Denomination Badge
-      final isCoin = detection.denomination.contains('COIN') || detection.value < 10;
-      final baseLabel = isCoin ? '₹${detection.value} Coin' : '₹${detection.value}';
-      final labelText = detection.isConflicting
-          ? '$baseLabel ?'
-          : (detection.isTentative ? '~$baseLabel' : baseLabel);
+      final String labelText;
+      if (isInvalid) {
+        labelText = 'INVALID';
+      } else if (isUnrecognised && detection.value == 0) {
+        labelText = 'UNRECOGNISED';
+      } else {
+        final isCoin = detection.denomination.contains('COIN') || detection.value < 10;
+        final baseLabel = isCoin ? '₹${detection.value} Coin' : '₹${detection.value}';
+        labelText = detection.isConflicting
+            ? '$baseLabel ?'
+            : (detection.isTentative ? '~$baseLabel' : baseLabel);
+      }
+
       final textSpan = TextSpan(
         children: [
           TextSpan(
@@ -143,14 +161,15 @@ class BanknoteOverlayPainter extends CustomPainter {
               letterSpacing: 0.5,
             ),
           ),
-          TextSpan(
-            text: '${(detection.confidence * 100).toInt()}%',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.75),
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
+          if (detection.confidence > 0.0)
+            TextSpan(
+              text: '${(detection.confidence * 100).toInt()}%',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.75),
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
             ),
-          ),
         ],
       );
 

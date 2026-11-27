@@ -185,14 +185,15 @@ class OcrPostprocessing {
           worldPts.add(OcrPoint(origX, origY));
         }
 
+        final double angleDegrees = theta * 180.0 / math.pi;
+
         // Order corners: Top-Left, Top-Right, Bottom-Right, Bottom-Left
-        final ordered = _orderPoints(worldPts);
+        final ordered = _orderPoints(worldPts, angleDegrees);
 
         // Phase 5.11: Curved-text centerline & curvature analysis along PCA major axis
         List<OcrPoint> centerline = const [];
         double curveHalfHeight = 0.0;
         String geometryType = 'straight';
-        final double angleDegrees = theta * 180.0 / math.pi;
 
         if (boxW >= boxH * 2.2 && compCount >= 24) {
           const int numSlices = 8;
@@ -263,12 +264,11 @@ class OcrPostprocessing {
                   ),
                 );
               }
-              // Ensure consistent left-to-right (or top-to-bottom if vertical) order
+              // Ensure consistent forward text direction along PCA major axis (cosT, sinT)
               if (pts.length >= 2) {
-                final dxSpan = (pts.last.x - pts.first.x).abs();
-                final dySpan = (pts.last.y - pts.first.y).abs();
-                if ((dxSpan >= dySpan && pts.first.x > pts.last.x) ||
-                    (dySpan > dxSpan && pts.first.y > pts.last.y)) {
+                final uFirst = pts.first.x * cosT + pts.first.y * sinT;
+                final uLast = pts.last.x * cosT + pts.last.y * sinT;
+                if (uFirst > uLast) {
                   centerline = pts.reversed.toList();
                 } else {
                   centerline = pts;
@@ -297,20 +297,34 @@ class OcrPostprocessing {
     return polygons;
   }
 
-  /// Order 4 polygon points into [topLeft, topRight, bottomRight, bottomLeft].
-  static List<OcrPoint> _orderPoints(List<OcrPoint> pts) {
+  /// Order 4 polygon points into [topLeft, topRight, bottomRight, bottomLeft]
+  /// oriented along the polygon's text angle.
+  static List<OcrPoint> _orderPoints(List<OcrPoint> pts, [double angleDegrees = 0.0]) {
     if (pts.length != 4) return pts;
 
-    // Sort by sum (x + y) -> TL has min sum, BR has max sum
-    pts.sort((a, b) => (a.x + a.y).compareTo(b.x + b.y));
-    final tl = pts[0];
-    final br = pts[3];
+    final rad = angleDegrees * math.pi / 180.0;
+    final cosT = math.cos(rad);
+    final sinT = math.sin(rad);
 
-    // Among remaining two, TR has larger x (or smaller y - x)
-    final remaining = [pts[1], pts[2]];
-    remaining.sort((a, b) => (a.y - a.x).compareTo(b.y - b.x));
-    final tr = remaining[0];
-    final bl = remaining[1];
+    // Project points into oriented box coordinates (u along text, v down)
+    final projected = <({OcrPoint pt, double u, double v})>[];
+    for (final p in pts) {
+      projected.add((
+        pt: p,
+        u: p.x * cosT + p.y * sinT,
+        v: -p.x * sinT + p.y * cosT,
+      ));
+    }
+
+    // Sort by v (top vs bottom)
+    projected.sort((a, b) => a.v.compareTo(b.v));
+    final topTwo = [projected[0], projected[1]]..sort((a, b) => a.u.compareTo(b.u));
+    final bottomTwo = [projected[2], projected[3]]..sort((a, b) => a.u.compareTo(b.u));
+
+    final tl = topTwo[0].pt;
+    final tr = topTwo[1].pt;
+    final bl = bottomTwo[0].pt;
+    final br = bottomTwo[1].pt;
 
     return [tl, tr, br, bl];
   }
@@ -375,14 +389,18 @@ class OcrPostprocessing {
       final ty = next.y - prev.y;
       final mag = math.sqrt(tx * tx + ty * ty);
       if (mag < 1e-6) {
-        normals.add(const OcrPoint(0.0, 1.0));
+        normals.add(normals.isNotEmpty ? normals.last : const OcrPoint(0.0, 1.0));
       } else {
-        // Perpendicular to tangent (pointing downward in image coords when left-to-right)
+        // Unit normal perpendicular to tangent: (-ty/mag, tx/mag)
         double nx = -ty / mag;
         double ny = tx / mag;
-        if (tx.abs() >= ty.abs() && ny < 0) {
-          nx = -nx;
-          ny = -ny;
+        // Keep normal continuous across curve: ensure dot product with previous normal is positive
+        if (normals.isNotEmpty) {
+          final dot = nx * normals.last.x + ny * normals.last.y;
+          if (dot < 0) {
+            nx = -nx;
+            ny = -ny;
+          }
         }
         normals.add(OcrPoint(nx, ny));
       }
@@ -577,9 +595,9 @@ class OcrPostprocessing {
     return analyzeSceneAndOrder(items).lines;
   }
 
-  /// Analyze spatial layout (columns, headings, curved/vertical regions),
-  /// suppress duplicate overlapping regions, order lines intelligently, and
-  /// produce a concise blind-friendly scene & directional guidance summary.
+  /// Analyze spatial layout (sections, boxes, columns, headings, curved/vertical regions),
+  /// suppress duplicate overlapping regions, order lines intelligently according to the
+  /// section-first line-by-line reading rule, and produce a concise blind-friendly scene summary.
   static ({List<OcrLineResult> lines, String sceneSummary}) analyzeSceneAndOrder(
     List<OcrLineResult> items, {
     int imageWidth = 0,
@@ -601,45 +619,70 @@ class OcrPostprocessing {
         ? imageHeight
         : deduped.map((e) => e.polygon.maxY).reduce(math.max).ceil().clamp(1, 10000);
 
-    final columns = _splitIntoColumns(deduped, effW);
+    // 1. Detect dominant rotation angle from lines (full 360-degree rotation invariance)
+    final double domAngleDeg = _detectDominantAngle(deduped);
+    final double rad = domAngleDeg * math.pi / 180.0;
+    final double cosP = math.cos(rad);
+    final double sinP = math.sin(rad);
 
-    List<OcrLineResult> ordered;
-    final bool isMultiColumn = columns.length >= 2;
+    // Project lines into canonical document coordinate frame:
+    // u along the document reading direction (start to end of lines)
+    // v along the document line progression (top to bottom of page)
+    final orientedLines = deduped.map((line) {
+      return _toOrientedLine(line, cosP, sinP);
+    }).toList();
+
+    // 2. Check for prominent signboard heading first (large font, prominent position)
     bool hasProminentHeading = false;
+    _OrientedLine? prominentHeading;
+    final otherLines = <_OrientedLine>[];
 
-    if (isMultiColumn) {
-      ordered = <OcrLineResult>[];
-      for (int colIdx = 0; colIdx < columns.length; colIdx++) {
-        final colOrdered = _sortSingleColumnLines(columns[colIdx]);
-        for (final line in colOrdered) {
-          ordered.add(line.copyWith(columnIndex: colIdx));
+    if (orientedLines.length >= 2 && orientedLines.length <= 6) {
+      final heights = orientedLines.map((e) => e.height).toList()..sort();
+      final medianH = heights[heights.length ~/ 2];
+      for (final line in orientedLines) {
+        final isBig = medianH > 0 &&
+            line.height >= medianH * 1.55 &&
+            line.width >= effW * 0.18;
+        if (isBig && prominentHeading == null) {
+          prominentHeading = line;
+          hasProminentHeading = true;
+        } else {
+          otherLines.add(line);
         }
       }
     } else {
-      ordered = _sortSingleColumnLines(deduped);
+      otherLines.addAll(orientedLines);
+    }
 
-      if (ordered.length >= 2 && ordered.length <= 6) {
-        final heights = ordered.map((e) => e.polygon.height).toList()..sort();
-        final medianH = heights[heights.length ~/ 2];
-        final headings = <OcrLineResult>[];
-        final body = <OcrLineResult>[];
-        for (final line in ordered) {
-          final isBig = medianH > 0 &&
-              line.polygon.height >= medianH * 1.55 &&
-              line.polygon.width >= effW * 0.18;
-          if (isBig) {
-            headings.add(line.copyWith(isHeading: true));
-            hasProminentHeading = true;
-          } else {
-            body.add(line);
-          }
+    // 3. Partition content into cohesive Sections / Boxes / Columns
+    final sections = _clusterIntoSections(otherLines, effW);
+
+    // 4. Group sections sharing the same vertical space into Section Rows (left-to-right tiers)
+    // Rule: "first read one complete section, look for immediate next section in the same space,
+    // if not go down and follow the rule till the end"
+    final sectionRows = _groupSectionsIntoRows(sections);
+
+    // 5. Order lines within each section strictly line-by-line, and traverse sections row-by-row
+    final ordered = <OcrLineResult>[];
+    int sectionCounter = 0;
+
+    if (prominentHeading != null) {
+      ordered.add(prominentHeading.raw.copyWith(isHeading: true, columnIndex: 0));
+      sectionCounter++;
+    }
+
+    for (final row in sectionRows) {
+      for (final sec in row) {
+        final secLines = _sortSingleSectionLines(sec.lines);
+        for (final line in secLines) {
+          ordered.add(line.copyWith(columnIndex: sectionCounter));
         }
-        if (hasProminentHeading && body.isNotEmpty) {
-          ordered = [...headings, ...body];
-        }
+        sectionCounter++;
       }
     }
 
+    // 6. Assign final line indices and spatial position descriptions
     final finalLines = <OcrLineResult>[];
     for (int i = 0; i < ordered.length; i++) {
       final l = ordered[i];
@@ -657,15 +700,261 @@ class OcrPostprocessing {
       );
     }
 
+    final maxSecInRow = sectionRows.fold<int>(0, (m, r) => math.max(m, r.length));
     final summary = _buildSceneSummary(
       finalLines,
       effW,
       effH,
-      columnCount: columns.length,
+      columnCount: maxSecInRow,
       hasProminentHeading: hasProminentHeading,
     );
 
     return (lines: finalLines, sceneSummary: summary);
+  }
+
+  static double _detectDominantAngle(List<OcrLineResult> items) {
+    if (items.isEmpty) return 0.0;
+    double sumSin = 0.0;
+    double sumCos = 0.0;
+    int count = 0;
+
+    for (final item in items) {
+      if (item.confidence >= 0.50 && item.text.trim().isNotEmpty) {
+        // True 360-degree orientation combining polygon baseline tilt and recognition rotation.
+        // If polygon.angleDegrees already reflects the dominant tilt (|angle| > 45), don't
+        // double-add 90/270 degree rotation.
+        double lineAngle = item.polygon.angleDegrees;
+        if (item.orientationDegrees == 180) {
+          if (lineAngle.abs() <= 90.0) {
+            lineAngle += 180.0;
+          }
+        } else if (item.orientationDegrees != 0) {
+          if (lineAngle.abs() <= 45.0) {
+            lineAngle += item.orientationDegrees;
+          }
+        }
+
+        final rad = lineAngle * math.pi / 180.0;
+        final weight = item.confidence * math.max(1.0, math.min(10.0, item.text.trim().length.toDouble()));
+        sumSin += weight * math.sin(rad);
+        sumCos += weight * math.cos(rad);
+        count++;
+      }
+    }
+
+    if (count == 0) return 0.0;
+    final r = math.sqrt(sumSin * sumSin + sumCos * sumCos);
+    if (r < 1e-4) return 0.0;
+
+    double domRad = math.atan2(sumSin, sumCos);
+    double domDeg = domRad * 180.0 / math.pi;
+    if (domDeg < 0) domDeg += 360.0;
+
+    // Snap within 3.0 degrees of principal axes (0, 90, 180, 270)
+    if (domDeg < 3.0 || domDeg > 357.0) return 0.0;
+    if ((domDeg - 180.0).abs() <= 3.0) return 180.0;
+    if ((domDeg - 90.0).abs() <= 3.0) return 90.0;
+    if ((domDeg - 270.0).abs() <= 3.0) return 270.0;
+
+    return domDeg;
+  }
+
+  static _OrientedLine _toOrientedLine(
+    OcrLineResult line,
+    double cosP,
+    double sinP,
+  ) {
+    final pts = line.polygon.points;
+    double minU = double.infinity;
+    double maxU = -double.infinity;
+    double minV = double.infinity;
+    double maxV = -double.infinity;
+
+    for (final p in pts) {
+      final u = p.x * cosP + p.y * sinP;
+      final v = -p.x * sinP + p.y * cosP;
+      if (u < minU) minU = u;
+      if (u > maxU) maxU = u;
+      if (v < minV) minV = v;
+      if (v > maxV) maxV = v;
+    }
+
+    return _OrientedLine(
+      raw: line,
+      uMin: minU,
+      uMax: maxU,
+      vMin: minV,
+      vMax: maxV,
+    );
+  }
+
+  /// Clusters lines into cohesive Sections / Boxes using spatial proximity and gutter analysis.
+  static List<_LayoutSection> _clusterIntoSections(
+    List<_OrientedLine> items,
+    int effW,
+  ) {
+    if (items.isEmpty) return const [];
+    if (items.length == 1) return [_LayoutSection(items)];
+
+    final heights = items.map((e) => e.height).toList()..sort();
+    final medianH = heights[heights.length ~/ 2];
+    final vProxThresh = math.max(16.0, medianH * 1.85);
+
+    // Build adjacency list for connected-component clustering
+    final n = items.length;
+    final adj = List<List<int>>.generate(n, (_) => []);
+
+    for (int i = 0; i < n; i++) {
+      for (int j = i + 1; j < n; j++) {
+        final a = items[i];
+        final b = items[j];
+
+        // Vertical distance between lines
+        final double vGap = a.vMin > b.vMax
+            ? a.vMin - b.vMax
+            : (b.vMin > a.vMax ? b.vMin - a.vMax : 0.0);
+
+        if (vGap > vProxThresh) continue;
+
+        // Check horizontal overlap and margin alignment
+        final hOverlap = math.max(0.0, math.min(a.uMax, b.uMax) - math.max(a.uMin, b.uMin));
+        final minW = math.min(a.width, b.width);
+        final overlapRatio = minW > 0 ? hOverlap / minW : 0.0;
+        final leftAligned = (a.uMin - b.uMin).abs() <= math.max(14.0, medianH * 1.35);
+        final centerAligned = (a.uCenter - b.uCenter).abs() <= math.max(18.0, medianH * 1.55);
+
+        // Disjoint gutter check: If separated horizontally by clear empty space, do NOT connect
+        final double hGap = a.uMin > b.uMax
+            ? a.uMin - b.uMax
+            : (b.uMin > a.uMax ? b.uMin - a.uMax : 0.0);
+        final bool hasHorizontalGutter = hGap > math.max(16.0, medianH * 0.75);
+
+        if (!hasHorizontalGutter && (overlapRatio >= 0.20 || leftAligned || centerAligned)) {
+          adj[i].add(j);
+          adj[j].add(i);
+        }
+      }
+    }
+
+    // Traverse connected components
+    final visited = List<bool>.filled(n, false);
+    final sections = <_LayoutSection>[];
+
+    for (int i = 0; i < n; i++) {
+      if (visited[i]) continue;
+      final compLines = <_OrientedLine>[];
+      final queue = <int>[i];
+      visited[i] = true;
+
+      while (queue.isNotEmpty) {
+        final cur = queue.removeLast();
+        compLines.add(items[cur]);
+        for (final neighbor in adj[cur]) {
+          if (!visited[neighbor]) {
+            visited[neighbor] = true;
+            queue.add(neighbor);
+          }
+        }
+      }
+      sections.add(_LayoutSection(compLines));
+    }
+
+    return sections;
+  }
+
+  /// Groups sections into horizontal rows / tiers of sections sharing the same vertical space.
+  /// Sections within each row are sorted left-to-right (increasing uMin).
+  /// Rows are sorted from top to bottom (increasing vMin).
+  static List<List<_LayoutSection>> _groupSectionsIntoRows(
+    List<_LayoutSection> sections,
+  ) {
+    if (sections.isEmpty) return const [];
+    if (sections.length == 1) return [sections];
+
+    // Sort sections primarily by vertical start
+    final sorted = List<_LayoutSection>.from(sections)
+      ..sort((a, b) => a.vMin.compareTo(b.vMin));
+
+    final rows = <List<_LayoutSection>>[];
+
+    for (final sec in sorted) {
+      bool placed = false;
+      for (final row in rows) {
+        final rowVMin = row.map((s) => s.vMin).reduce(math.min);
+        final rowVMax = row.map((s) => s.vMax).reduce(math.max);
+        final rowH = math.max(1.0, rowVMax - rowVMin);
+        final minH = math.min(sec.height, rowH);
+
+        final overlap = math.max(0.0, math.min(sec.vMax, rowVMax) - math.max(sec.vMin, rowVMin));
+        if (overlap >= minH * 0.35) {
+          row.add(sec);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        rows.add([sec]);
+      }
+    }
+
+    // Sort rows top-to-bottom
+    rows.sort((a, b) {
+      final aMin = a.map((s) => s.vMin).reduce(math.min);
+      final bMin = b.map((s) => s.vMin).reduce(math.min);
+      return aMin.compareTo(bMin);
+    });
+
+    // Within each row, sort sections left-to-right (increasing uMin)
+    for (final row in rows) {
+      row.sort((a, b) => a.uMin.compareTo(b.uMin));
+    }
+
+    return rows;
+  }
+
+  /// Sorts lines within a single section strictly line-by-line from top to bottom,
+  /// sorting multiple words/fragments on the same line left-to-right.
+  static List<OcrLineResult> _sortSingleSectionLines(List<_OrientedLine> items) {
+    if (items.isEmpty) return const [];
+    if (items.length == 1) return [items.first.raw];
+
+    final sorted = List<_OrientedLine>.from(items)
+      ..sort((a, b) => a.vCenter.compareTo(b.vCenter));
+
+    final List<List<_OrientedLine>> visualLines = [];
+    List<_OrientedLine> currentLine = [];
+    double currentCenterV = sorted.first.vCenter;
+    double currentHeight = sorted.first.height;
+
+    for (final item in sorted) {
+      if (currentLine.isEmpty) {
+        currentLine.add(item);
+        currentCenterV = item.vCenter;
+        currentHeight = item.height;
+      } else {
+        final bandThreshold = math.max(8.0, math.min(currentHeight, item.height) * 0.55);
+        if ((item.vCenter - currentCenterV).abs() < bandThreshold) {
+          currentLine.add(item);
+          currentCenterV = currentLine.fold<double>(0.0, (s, e) => s + e.vCenter) / currentLine.length;
+          currentHeight = currentLine.fold<double>(0.0, (s, e) => s + e.height) / currentLine.length;
+        } else {
+          visualLines.add(currentLine);
+          currentLine = [item];
+          currentCenterV = item.vCenter;
+          currentHeight = item.height;
+        }
+      }
+    }
+    if (currentLine.isNotEmpty) {
+      visualLines.add(currentLine);
+    }
+
+    final result = <OcrLineResult>[];
+    for (final vLine in visualLines) {
+      vLine.sort((a, b) => a.uMin.compareTo(b.uMin));
+      result.addAll(vLine.map((e) => e.raw));
+    }
+    return result;
   }
 
   static List<OcrLineResult> _suppressOverlappingLines(List<OcrLineResult> items) {
@@ -698,39 +987,6 @@ class OcrPostprocessing {
     if (inter <= 0.0) return 0.0;
     final union = a.width * a.height + b.width * b.height - inter;
     return union > 0.0 ? inter / union : 0.0;
-  }
-
-  static List<List<OcrLineResult>> _splitIntoColumns(
-    List<OcrLineResult> items,
-    int imageWidth,
-  ) {
-    if (items.length < 4 || imageWidth <= 0) {
-      return [items];
-    }
-    final sortedByLeft = List<OcrLineResult>.from(items)
-      ..sort((a, b) => a.polygon.minX.compareTo(b.polygon.minX));
-
-    final intervals = <({double start, double end, List<OcrLineResult> lines})>[];
-    for (final item in sortedByLeft) {
-      final s = item.polygon.minX;
-      final e = item.polygon.maxX;
-      if (intervals.isEmpty || s > intervals.last.end + imageWidth * 0.03) {
-        intervals.add((start: s, end: e, lines: [item]));
-      } else {
-        final last = intervals.last;
-        intervals[intervals.length - 1] = (
-          start: math.min(last.start, s),
-          end: math.max(last.end, e),
-          lines: [...last.lines, item],
-        );
-      }
-    }
-
-    final multiLineCols = intervals.where((iv) => iv.lines.length >= 2).toList();
-    if (multiLineCols.length >= 2 && intervals.length == multiLineCols.length) {
-      return intervals.map((iv) => iv.lines).toList();
-    }
-    return [items];
   }
 
   static List<OcrLineResult> _sortSingleColumnLines(List<OcrLineResult> items) {
@@ -841,5 +1097,47 @@ class OcrPostprocessing {
     }
     return parts.join(' ');
   }
+}
+
+class _OrientedLine {
+  final OcrLineResult raw;
+  final double uMin;
+  final double uMax;
+  final double vMin;
+  final double vMax;
+  final double uCenter;
+  final double vCenter;
+  final double width;
+  final double height;
+
+  _OrientedLine({
+    required this.raw,
+    required this.uMin,
+    required this.uMax,
+    required this.vMin,
+    required this.vMax,
+  })  : uCenter = (uMin + uMax) / 2.0,
+        vCenter = (vMin + vMax) / 2.0,
+        width = math.max(1.0, uMax - uMin),
+        height = math.max(1.0, vMax - vMin);
+}
+
+class _LayoutSection {
+  final List<_OrientedLine> lines;
+  double uMin;
+  double uMax;
+  double vMin;
+  double vMax;
+
+  _LayoutSection(this.lines)
+      : uMin = lines.isEmpty ? 0.0 : lines.map((l) => l.uMin).reduce(math.min),
+        uMax = lines.isEmpty ? 0.0 : lines.map((l) => l.uMax).reduce(math.max),
+        vMin = lines.isEmpty ? 0.0 : lines.map((l) => l.vMin).reduce(math.min),
+        vMax = lines.isEmpty ? 0.0 : lines.map((l) => l.vMax).reduce(math.max);
+
+  double get width => math.max(1.0, uMax - uMin);
+  double get height => math.max(1.0, vMax - vMin);
+  double get uCenter => (uMin + uMax) / 2.0;
+  double get vCenter => (vMin + vMax) / 2.0;
 }
 

@@ -175,6 +175,10 @@ class _CameraScreenState extends State<CameraScreen>
   bool _isSpeakingCurrency = false;
   DateTime _lastSpokenTime = DateTime.fromMillisecondsSinceEpoch(0);
 
+  // Assistive Haptic Guidance State (Continuous vibration when currency visible until recognized)
+  Timer? _hapticGuidanceTimer;
+  bool _isGuidanceVibrating = false;
+
   // Currency Snapshot Capture State
   bool _isCurrencyCapturing = false;
   CurrencyInferenceResult? _lastCaptureResult;
@@ -199,6 +203,12 @@ class _CameraScreenState extends State<CameraScreen>
     _ocrService = OcrService();
     _speechService = SpeechService();
     _autoFlashlightController = AutoFlashlightController(
+      config: const AutoFlashlightConfig(
+        lightOnThresholdLux: 3.0,
+        lightOffThresholdLux: 10.0,
+        reflectionHeadroomLux: 5.0,
+        maxReflectionBaselineLux: 35.0,
+      ),
       onSetTorch: _setTorchFromAutoController,
       onAnnounce: (text, {required language}) async {
         if (_isMuted || _showLanguagePopup) return;
@@ -645,10 +655,9 @@ class _CameraScreenState extends State<CameraScreen>
           return;
         }
 
-        // Frame rate throttling: 1 inference every ~350ms (~2.8 FPS inference)
-        // Keeps the device cool and the UI running at a silky-smooth 60 FPS
+        // Real-time camera inference with low latency (120ms throttle -> up to 7-8 FPS)
         final now = DateTime.now().millisecondsSinceEpoch;
-        if (now - _lastInferenceTimestamp < 350) {
+        if (now - _lastInferenceTimestamp < 120) {
           return;
         }
         _lastInferenceTimestamp = now;
@@ -693,6 +702,7 @@ class _CameraScreenState extends State<CameraScreen>
             regionFilteredDetections,
             imageWidth: result.imageWidth,
             imageHeight: result.imageHeight,
+            extraReasons: result.uncertaintyReasons.toSet(),
           );
           final activeDetections = trackerResult.activeDetections;
 
@@ -700,6 +710,7 @@ class _CameraScreenState extends State<CameraScreen>
             _logCandidateLiveAudit(result, trackerResult);
           }
 
+          _updateHapticGuidance(trackerResult.assessment, activeDetections);
           _handleRealtimeSpeech(trackerResult.assessment);
 
           setState(() {
@@ -722,6 +733,7 @@ class _CameraScreenState extends State<CameraScreen>
 
   Future<void> _stopLiveStream() async {
     _isLiveStreamActive = false;
+    _stopHapticGuidance();
     _currencyTracker.reset();
     final controller = _cameraController;
     if (controller != null && controller.value.isStreamingImages) {
@@ -769,41 +781,115 @@ class _CameraScreenState extends State<CameraScreen>
     );
   }
 
+  /// Continuous assistive haptic feedback: Vibrates gently while currency is visible
+  /// in the camera feed until it is recognized and speech begins.
+  void _stopHapticGuidance() {
+    if (_isGuidanceVibrating) {
+      _isGuidanceVibrating = false;
+      _hapticGuidanceTimer?.cancel();
+      _hapticGuidanceTimer = null;
+    }
+  }
+
+  void _updateHapticGuidance(
+    CurrencySafetyAssessment assessment,
+    List<CurrencyDetection> activeDetections,
+  ) {
+    if (_isMuted || _isSpeakingOcr || _isOcrRunning) {
+      _stopHapticGuidance();
+      return;
+    }
+
+    final hasVisibleCurrency = activeDetections.isNotEmpty &&
+        assessment.status != AnnouncementSafetyStatus.empty;
+    final names = activeDetections.map((d) => d.denomination).toList()..sort();
+    final String currentSignature = names.join(',');
+    final bool isAlreadyRecognized = _lastSpokenSignature.isNotEmpty && _lastSpokenSignature == currentSignature;
+    final isConfirmedOrSpeaking = _isSpeakingCurrency || isAlreadyRecognized;
+
+    if (hasVisibleCurrency && !isConfirmedOrSpeaking) {
+      if (!_isGuidanceVibrating) {
+        _isGuidanceVibrating = true;
+        _hapticGuidanceTimer?.cancel();
+        HapticFeedback.mediumImpact();
+        _hapticGuidanceTimer = Timer.periodic(
+          const Duration(milliseconds: 250),
+          (timer) {
+            if (!_isGuidanceVibrating) {
+              timer.cancel();
+            } else {
+              HapticFeedback.lightImpact();
+            }
+          },
+        );
+      }
+    } else {
+      _stopHapticGuidance();
+    }
+  }
+
   /// Real-time speech announcement for detected currency items with safety gating
   void _handleRealtimeSpeech(CurrencySafetyAssessment assessment) {
     if (_isMuted || _isSpeakingOcr || _isOcrRunning || _isSpeakingCurrency) {
       return;
     }
 
+    final bool hasSpecialStatus =
+        assessment.reasons.contains('INVALID_CURRENCY_DETECTED') ||
+        assessment.reasons.contains('FOREIGN_CURRENCY_DETECTED') ||
+        assessment.reasons.contains('UNRECOGNISED_CURRENCY') ||
+        assessment.reasons.contains('IDENTITY_UNKNOWN');
     final detections = assessment.screenedDetections;
-    if (detections.isEmpty ||
+    if ((detections.isEmpty && !hasSpecialStatus) ||
         assessment.status == AnnouncementSafetyStatus.empty) {
+      _stopHapticGuidance();
       _pendingSignature = '';
       _pendingCount = 0;
       _lastSpokenSignature = '';
       return;
     }
 
-    // Include safety confirmation state in signature so unconfirmed states never mimic confirmed totals
-    final String signature;
-    if (!_currencyModelService.isCandidateMode) {
-      final names = detections.map((d) => d.denomination).toList()..sort();
-      signature = names.join(',');
-    } else if (assessment.isTotalConfirmed) {
-      final names =
-          detections.map((d) => '${d.denomination}:confirmed').toList()..sort();
-      signature = 'CONFIRMED|${names.join(',')}';
-    } else {
-      signature =
-          'UNCERTAIN|${assessment.status.name}|${assessment.spokenMessage}';
+    if (assessment.spokenMessage.isEmpty) {
+      return;
     }
 
-    final int requiredFrames = _currencyModelService.isCandidateMode ? 3 : 2;
-    final int reannounceSec =
-        _currencyModelService.isCandidateMode && !assessment.isTotalConfirmed
-        ? 7
-        : 5;
     final now = DateTime.now();
+
+    // 1. CONFIRMED CURRENCY ANNOUNCEMENT
+    if (assessment.isTotalConfirmed) {
+      final names = detections.map((d) => '${d.denomination}:confirmed').toList()..sort();
+      final String signature = 'CONFIRMED|${names.join(',')}';
+      const int requiredFrames = 2;
+      const int reannounceSec = 5;
+
+      if (signature != _lastSpokenSignature) {
+        if (signature == _pendingSignature) {
+          _pendingCount++;
+        } else {
+          _pendingSignature = signature;
+          _pendingCount = 1;
+        }
+
+        if (_pendingCount >= requiredFrames) {
+          _speakCurrencyAssessment(assessment);
+          _lastSpokenSignature = signature;
+          _lastSpokenTime = now;
+        }
+      } else {
+        if (now.difference(_lastSpokenTime).inSeconds >= reannounceSec) {
+          _speakCurrencyAssessment(assessment);
+          _lastSpokenTime = now;
+        }
+      }
+      return;
+    }
+
+    // 2. UNCONFIRMED / DIFFICULT TO DENOMINATE GUIDANCE ANNOUNCEMENT
+    // Spoken when currency is visible but cannot be safely confirmed (covered, conflict, or unclear angle).
+    // Tells the blind user what is happening instead of leaving them in silence!
+    final String signature = 'GUIDANCE|${assessment.status.name}|${assessment.spokenMessage}';
+    const int requiredFrames = 3;
+    const int reannounceSec = 6;
 
     if (signature != _lastSpokenSignature) {
       if (signature == _pendingSignature) {
@@ -829,7 +915,12 @@ class _CameraScreenState extends State<CameraScreen>
   Future<void> _speakCurrencyAssessment(
     CurrencySafetyAssessment assessment,
   ) async {
-    if (assessment.screenedDetections.isEmpty ||
+    final bool hasSpecialStatus =
+        assessment.reasons.contains('INVALID_CURRENCY_DETECTED') ||
+        assessment.reasons.contains('FOREIGN_CURRENCY_DETECTED') ||
+        assessment.reasons.contains('UNRECOGNISED_CURRENCY') ||
+        assessment.reasons.contains('IDENTITY_UNKNOWN');
+    if ((assessment.screenedDetections.isEmpty && !hasSpecialStatus) ||
         _isMuted ||
         _showLanguagePopup ||
         _isSpeakingOcr ||
@@ -842,6 +933,7 @@ class _CameraScreenState extends State<CameraScreen>
       return;
     }
 
+    _stopHapticGuidance();
     _isSpeakingCurrency = true;
     _lastSpokenTime = DateTime.now();
     HapticFeedback.lightImpact();
@@ -907,8 +999,12 @@ class _CameraScreenState extends State<CameraScreen>
         _lastCaptureSafetyAssessment = assessment;
       });
 
-      if (result.detections.isEmpty ||
-          assessment.status == AnnouncementSafetyStatus.empty) {
+      final bool hasSpecialStatus =
+          assessment.reasons.contains('INVALID_CURRENCY_DETECTED') ||
+          assessment.reasons.contains('FOREIGN_CURRENCY_DETECTED') ||
+          assessment.reasons.contains('UNRECOGNISED_CURRENCY') ||
+          assessment.reasons.contains('IDENTITY_UNKNOWN');
+      if (assessment.status == AnnouncementSafetyStatus.empty && !hasSpecialStatus) {
         HapticFeedback.vibrate();
         await _speechService.speakText(
           CurrencySpeechFormatter.formatEmptyPrompt(_currencyLanguage),
@@ -941,9 +1037,20 @@ class _CameraScreenState extends State<CameraScreen>
     bool announceEntry = false,
     bool isReread = false,
   }) async {
+    // If camera is still initializing (e.g. app just launched or resumed), wait briefly
+    for (int i = 0;
+        i < 25 &&
+            (!_cameraReady ||
+                _cameraController == null ||
+                !_cameraController!.value.isInitialized);
+        i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+    }
+
     final camera = _cameraController;
     if (!_cameraReady || camera == null || !camera.value.isInitialized) {
       debugPrint('[OCR-AUTO] Camera not ready for capture.');
+      _lastTriggeredOcrGen = -1;
       if (!_isMuted) {
         unawaited(
           _speechService.speakText(
@@ -958,7 +1065,6 @@ class _CameraScreenState extends State<CameraScreen>
     if (expectedModeGen != null) {
       if (_lastTriggeredOcrGen == expectedModeGen) return;
       if (!_modeController.isOcrGenerationValid(expectedModeGen)) return;
-      _lastTriggeredOcrGen = expectedModeGen;
     } else if (_isSpeakingOcr) {
       HapticFeedback.selectionClick();
       await _speechService.stop();
@@ -966,7 +1072,33 @@ class _CameraScreenState extends State<CameraScreen>
       return;
     }
 
-    if (!_ocrModelReady) return;
+    // Ensure OCR models are ready before proceeding
+    if (!_ocrModelReady) {
+      debugPrint('[OCR-AUTO] OCR model initializing; awaiting loadModels()...');
+      try {
+        await _ocrService.loadModels();
+        if (mounted) {
+          setState(() => _ocrModelReady = true);
+        }
+      } catch (e) {
+        debugPrint('[OCR-AUTO] Load failed: $e');
+        _lastTriggeredOcrGen = -1;
+        if (!_isMuted) {
+          unawaited(
+            _speechService.speakText(
+              'Text recognition is loading. Please try again.',
+              language: 'en-IN',
+            ),
+          );
+        }
+        return;
+      }
+    }
+
+    if (expectedModeGen != null) {
+      _lastTriggeredOcrGen = expectedModeGen;
+    }
+
     if (!isReread && _isOcrRunning) return;
 
     final int captureGen = expectedModeGen ?? _modeController.modeGenerationId;
@@ -999,22 +1131,40 @@ class _CameraScreenState extends State<CameraScreen>
 
     try {
       await _stopLiveStream();
-      // Wait briefly if an in-flight currency frame or prior takePicture is winding down.
-      for (int i = 0; i < 20 && (_isProcessingFrame || _isTakingPicture); i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 20));
+      // Wait for any in-flight currency frame or previous takePicture to settle
+      for (int i = 0; i < 30 && (_isProcessingFrame || _isTakingPicture); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 25));
       }
+      // CameraX HAL stabilization delay to ensure ImageAnalysis buffers are detached
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+
       if (!mounted || !_modeController.isOcrGenerationValid(captureGen)) return;
 
       debugPrint(
         '[OCR-AUTO] Capturing fresh frame (gen=$captureGen reread=$isReread)...',
       );
       _isTakingPicture = true;
-      final XFile photo;
-      try {
-        photo = await camera.takePicture();
-      } finally {
-        _isTakingPicture = false;
+      XFile? photo;
+      Object? lastCaptureError;
+      for (int attempt = 0; attempt < 3; attempt++) {
+        if (!mounted || !_modeController.isOcrGenerationValid(captureGen)) return;
+        try {
+          photo = await camera.takePicture();
+          if (photo != null) break;
+        } catch (e) {
+          lastCaptureError = e;
+          debugPrint('[OCR-AUTO] takePicture attempt $attempt failed: $e');
+          if (attempt < 2) {
+            await Future<void>.delayed(const Duration(milliseconds: 150));
+          }
+        }
       }
+      _isTakingPicture = false;
+
+      if (photo == null) {
+        throw Exception('takePicture failed after 3 attempts: $lastCaptureError');
+      }
+
       if (_isTorchOn) {
         try {
           await camera.setFlashMode(FlashMode.torch);
@@ -1029,7 +1179,7 @@ class _CameraScreenState extends State<CameraScreen>
 
       final result = await _ocrService.processImage(
         imageBytes,
-        preferredLanguage: null,
+        preferredLanguage: _languageController.selectedCode,
       );
 
       if (!mounted || !_modeController.isOcrGenerationValid(captureGen)) {
@@ -1099,8 +1249,20 @@ class _CameraScreenState extends State<CameraScreen>
       }
     } catch (e) {
       debugPrint('[OCR] Trigger failed: $e');
+      _lastTriggeredOcrGen = -1;
       if (mounted && _modeController.isOcrGenerationValid(captureGen)) {
-        setState(() => _isSpeakingOcr = false);
+        setState(() {
+          _isSpeakingOcr = false;
+          _isOcrRunning = false;
+        });
+        if (!_isMuted) {
+          unawaited(
+            _speechService.speakText(
+              'Could not read text. Please tap the screen to try again.',
+              language: 'en-IN',
+            ),
+          );
+        }
         _startLiveStream();
       }
     } finally {
@@ -1314,18 +1476,27 @@ class _CameraScreenState extends State<CameraScreen>
   }
 
   void _setMode(bool isCurrency) {
-    if (_isCurrencyMode == isCurrency) return;
+    if (_isCurrencyMode == isCurrency) {
+      if (!isCurrency) {
+        // Tapping OCR mode while already in OCR mode initiates an immediate fresh capture & read
+        unawaited(_triggerOcrTextRecognition(isReread: true));
+      }
+      return;
+    }
     HapticFeedback.mediumImpact();
     _currencyInferenceEpoch++;
+    unawaited(_speechService.stop());
     setState(() {
       _isCurrencyMode = isCurrency;
       _currentDetections = const [];
       _currentSafetyAssessment = null;
       _showCaptureResult = false;
-      _showOcrSheet = false;
+      _showOcrSheet = !isCurrency;
+      _isSpeakingCurrency = false;
+      _lastTriggeredOcrGen = -1;
+      _isOcrRunning = false;
+      _isSpeakingOcr = false;
       if (isCurrency) {
-        _isOcrRunning = false;
-        _isSpeakingOcr = false;
         _lastOcrResult = null;
       }
     });
@@ -1533,7 +1704,9 @@ class _CameraScreenState extends State<CameraScreen>
                                   shape: BoxShape.circle,
                                   color: _isCurrencyMode
                                       ? (_currencyModelReady
-                                            ? const Color(0xFF00E676)
+                                            ? (_currentDetections.isNotEmpty
+                                                  ? const Color(0xFF00E676)
+                                                  : const Color(0xFFFFD600))
                                             : Colors.orangeAccent)
                                       : (_ocrModelReady
                                             ? const Color(0xFF29B6F6)
@@ -1542,7 +1715,9 @@ class _CameraScreenState extends State<CameraScreen>
                                     BoxShadow(
                                       color:
                                           (_isCurrencyMode
-                                                  ? const Color(0xFF00E676)
+                                                  ? (_currentDetections.isNotEmpty
+                                                        ? const Color(0xFF00E676)
+                                                        : const Color(0xFFFFD600))
                                                   : const Color(0xFF29B6F6))
                                               .withValues(alpha: 0.6),
                                       blurRadius: 6,
@@ -1558,10 +1733,7 @@ class _CameraScreenState extends State<CameraScreen>
                                     : (_isCurrencyMode
                                           ? (_currentDetections.isNotEmpty
                                                 ? 'DETECTED (${_currentDetections.length})'
-                                                : (_currencyModelService
-                                                          .isCandidateMode
-                                                      ? 'CANDIDATE VISION'
-                                                      : 'CURRENCY VISION'))
+                                                : 'Offline')
                                           : 'DOCUMENT OCR'),
                                 style: const TextStyle(
                                   color: Colors.white,

@@ -8,6 +8,7 @@ import 'bisaya_speech_assembler.dart';
 import 'currency_safety_evaluator.dart';
 import 'currency_speech_formatter.dart';
 import 'ocr/ocr_result.dart';
+import 'ocr/ocr_symbol_normalizer.dart';
 
 class _SelectorSpeechRequest {
   _SelectorSpeechRequest({
@@ -973,10 +974,12 @@ class SpeechService {
             : unit.lang;
         final txt = unit.text.trim();
         if (txt.isEmpty) continue;
+        final spokenTxt = OcrSymbolNormalizer.expandForSpeech(txt, lang);
+        if (spokenTxt.isEmpty) continue;
         if (groups.isNotEmpty && groups.last.lang == lang) {
-          groups.last.texts.add(txt);
+          groups.last.texts.add(spokenTxt);
         } else {
-          groups.add((lang: lang, texts: [txt]));
+          groups.add((lang: lang, texts: [spokenTxt]));
         }
       }
     }

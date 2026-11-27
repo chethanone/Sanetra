@@ -11,6 +11,7 @@ export 'ocr_detection.dart';
 export 'ocr_recognition.dart';
 export 'ocr_preprocessing.dart';
 export 'ocr_postprocessing.dart';
+export 'ocr_symbol_normalizer.dart';
 
 class OcrService {
   final OcrDetectionService _detectionService = OcrDetectionService();

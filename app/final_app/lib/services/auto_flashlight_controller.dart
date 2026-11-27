@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -73,14 +74,15 @@ class AutoFlashlightPhrases {
 }
 
 typedef TorchSetCallback = Future<bool> Function(bool enabled);
-typedef TorchAnnounceCallback =
-    Future<void> Function(String text, {required String language});
-typedef TorchAnnounceWithClipsCallback =
-    Future<void> Function(
-      String text, {
-      required String language,
-      List<String>? bisayaClips,
-    });
+typedef TorchAnnounceCallback = Future<void> Function(
+  String text, {
+  required String language,
+});
+typedef TorchAnnounceWithClipsCallback = Future<void> Function(
+  String text, {
+  required String language,
+  List<String>? bisayaClips,
+});
 
 /// Shared automatic ambient-light flashlight controller for Currency and OCR modes.
 class AutoFlashlightController {
@@ -239,7 +241,9 @@ class AutoFlashlightController {
     if (!_isMonitoring || _isDisposed) return;
 
     if (!_sensorAvailable) {
-      debugPrint('[AUTO-FLASH] Ambient light sensor unavailable; monitoring disabled.');
+      debugPrint(
+        '[AUTO-FLASH] Ambient light sensor unavailable; monitoring disabled.',
+      );
       _isMonitoring = false;
       return;
     }
@@ -253,7 +257,9 @@ class AutoFlashlightController {
     if (!_isMonitoring || _isDisposed) return;
     if (externalOn && !_controllerOwnsTorch) {
       _externalTorchProtected = true;
-      debugPrint('[AUTO-FLASH] External torch already ON; preserving external ownership.');
+      debugPrint(
+        '[AUTO-FLASH] External torch already ON; preserving external ownership.',
+      );
     } else {
       _externalTorchProtected = false;
     }
@@ -272,16 +278,14 @@ class AutoFlashlightController {
     _cancelConfirmationTimer();
     _lowLightSince = null;
     _brightLightSince = null;
+    _manualTorchOverride = true;
+    _controllerOwnsTorch = false;
+    _externalTorchProtected = false;
+    _lastTransitionAt = _now();
     if (enabled) {
-      _manualTorchOverride = true;
-      _controllerOwnsTorch = false;
       debugPrint('[AUTO-FLASH] Manual torch ON; auto-off suspended.');
     } else {
-      _manualTorchOverride = false;
-      _controllerOwnsTorch = false;
-      _externalTorchProtected = false;
-      _lastTransitionAt = _now();
-      debugPrint('[AUTO-FLASH] Manual torch OFF; auto control resumed.');
+      debugPrint('[AUTO-FLASH] Manual torch OFF; auto control suspended.');
     }
   }
 
@@ -392,7 +396,9 @@ class AutoFlashlightController {
 
     if (waitDuration <= Duration.zero) {
       _cancelConfirmationTimer();
-      unawaited(_applyTorchTransition(targetEnabled: targetEnabled, announce: true));
+      unawaited(
+        _applyTorchTransition(targetEnabled: targetEnabled, announce: true),
+      );
       return;
     }
 
